@@ -25,7 +25,7 @@ make it public.
 
 ## Supported versions
 
-Replica is in development, and fixes go into the latest version only.
+Fixes go into the latest release only.
 
 ## What's most sensitive
 

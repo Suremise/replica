@@ -22,8 +22,10 @@ Replica is free and open source (MIT), for Windows 10 and 11. It drives
 [restic](https://restic.net) for its snapshots and bundles a pinned copy, so there's nothing else
 to install.
 
-> **Status:** in development, towards v1. There's no release yet: to try it, build it from source
-> (below). The tray app, its window and the command line work.
+> **Status:** version 0.1.0, the first release: download it from
+> [Releases](https://github.com/Suremise/replica/releases) ([Installing](#installing), below).
+> It isn't code-signed yet, so check the download against its `SHA256SUMS.txt`
+> ([SmartScreen and checksums](#smartscreen-and-checksums)).
 
 **[The user guide](docs/user-guide.md)** covers setting up jobs, keeping the repository password
 safe, restoring, a test restore routine, recovering without Replica and troubleshooting.
@@ -46,7 +48,8 @@ files (30% by default), as when a source was emptied by mistake.
 
 ## Quick start
 
-1. **Build or install Replica** (see [Building from source](#building-from-source)).
+1. **Install Replica** (see [Installing](#installing)), or build it from source (see
+   [Building from source](#building-from-source)).
 2. **Set up a job** in the window (**Jobs > Add job**, from the tray icon), or in `settings.toml`,
    in `%APPDATA%\Replica\` (or beside the exe for a portable copy). [docs/settings.example.toml](docs/settings.example.toml) documents every key; the
    [job model](#jobs) below shows the short version.
@@ -180,7 +183,7 @@ such as a "run on close" setting. The exit codes are 0 ok, 1 failed, 2 partly do
 
 ## Installing
 
-Replica will ship two ways, each with both exes (`replica.exe`, the command line, and
+Replica ships two ways, each with both exes (`replica.exe`, the command line, and
 `replica-tray.exe`, the tray app), the bundled restic, the licence and the third-party notices:
 
 - **The MSI**, installed per user, with no admin rights, to `%LOCALAPPDATA%\Programs\Replica`.
@@ -215,10 +218,16 @@ too, and keeps your settings, history and backups.
 
 Replica isn't code-signed yet, so Windows SmartScreen may warn the first time you run the
 installer or the exes ("Windows protected your PC"). Check the download first: compare its SHA-256
-with the one in the release's `SHA256SUMS.txt`,
+with the one in the release's `SHA256SUMS.txt`, in PowerShell
 
 ```
 Get-FileHash .\replica-<version>-portable.zip -Algorithm SHA256
+```
+
+or, with `SHA256SUMS.txt` beside the downloads, in Git Bash or WSL
+
+```
+sha256sum -c SHA256SUMS.txt --ignore-missing
 ```
 
 and if they match, choose **More info**, then **Run anyway**.

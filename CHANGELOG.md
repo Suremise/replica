@@ -6,7 +6,14 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
-The first version, in development towards v1.
+## [0.1.0] - 2026-10-24
+
+The first release.
+
+**Not signed yet:** Windows SmartScreen may warn the first time you run the installer or the
+exes ("Windows protected your PC"). Check the download against the release's `SHA256SUMS.txt`
+first (`sha256sum -c SHA256SUMS.txt --ignore-missing`, or compare `Get-FileHash <file>` with
+it), and if it matches, choose **More info**, then **Run anyway**.
 
 ### Added
 
@@ -22,11 +29,13 @@ The first version, in development towards v1.
   file, appears whole at once: two at the same moment (the window and the tray, say) each leave a
   whole file rather than failing, and other files beside it are left alone.
 - **The command line**, `replica.exe`: `run`, `list`, `status`, `snapshots`, `restore`, `verify`,
-  `init`, `key show`, `key set`, `login set`, `export`, `import` and `tasks`, with exit codes for scripts (0 ok, 1 failed, 2 partly done, 3
-  skipped, 4 a usage or settings error) and `--json` output for other programs.
+  `init`, `key show`, `key set`, `login set`, `export`, `import` and `tasks`, with exit codes for
+  scripts (0 ok, 1 failed, 2 partly done, 3 skipped, 4 a usage or settings error) and `--json`
+  output for other programs.
 - **Restore** of a file or folder from any of a job's snapshots, into a new or empty folder, asked
   for by any of its names (its short 8.3 name, in another case or through a junction) whichever
-  the source was backed up by, and a `HOW-TO-RESTORE.txt` beside each repository for restoring without Replica.
+  the source was backed up by, and a `HOW-TO-RESTORE.txt` beside each repository for restoring
+  without Replica.
 - **Repository passwords** made by Replica, shown once to be saved, and kept in Windows
   Credential Manager. A saved copy can be put back on a new PC (`replica key set`, or **Enter a
   saved password…** in the window), only once it's checked against the repository.
@@ -64,4 +73,5 @@ The first version, in development towards v1.
 - Translation-ready: every message comes from Fluent strings. English only for now.
 - No telemetry and no network except the targets you set up.
 
-[Unreleased]: https://github.com/Suremise/replica/commits/main
+[Unreleased]: https://github.com/Suremise/replica/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Suremise/replica/releases/tag/v0.1.0
