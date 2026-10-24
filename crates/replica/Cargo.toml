@@ -1,0 +1,49 @@
+[package]
+name = "replica"
+description = "Replica: versioned backups and mirrors for Windows."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "replica"
+path = "src/bin/replica.rs"
+
+[[bin]]
+name = "replica-tray"
+path = "src/bin/replica-tray.rs"
+
+[dependencies]
+replica-core.workspace = true
+replica-win.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+eframe.workspace = true
+egui_extras.workspace = true
+rfd.workspace = true
+winit.workspace = true
+raw-window-handle.workspace = true
+
+[build-dependencies]
+embed-resource.workspace = true
+# Decodes the app icon's PNGs at build time, for the window's sidebar and About page.
+png.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+# The screenshot harness (tests/ui_shots.rs) renders with wgpu and writes PNGs. Dev-only:
+# never in the exe.
+egui_kittest = { workspace = true, features = ["wgpu"] }
+image = { workspace = true, features = ["png"] }
+
+[lints]
+workspace = true

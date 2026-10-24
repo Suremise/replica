@@ -1,0 +1,29 @@
+# OS and editor files
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
+*.swp
+*~
+
+# Logs
+*.log
+logs/
+
+# Build output
+target/
+
+# Fetched by scripts/fetch-restic.ps1, never committed
+third_party/restic/bin/
+
+# Python bytecode (build-only scripts)
+__pycache__/
+
+# Local reference files (worked examples), never committed
+/reference/
+
+# Local builds, never committed
+/dist/
+
+# Personal notes for Claude Code on this PC (AGENTS.md has the shared ones)
+CLAUDE.local.md

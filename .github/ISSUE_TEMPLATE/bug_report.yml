@@ -1,0 +1,67 @@
+name: Bug report
+description: Something in Replica doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting it. **A security problem?** Please don't open an issue: report it privately, as [SECURITY.md](https://github.com/Suremise/replica/blob/main/SECURITY.md) says.
+
+        Before pasting anything, check it for things you'd rather keep private, such as folder or share names. Replica never writes passwords to its logs or its `--json` output, but **never paste a repository password or a share login**.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to show it
+      description: The commands you ran or what you clicked, and the job's settings if they matter (from `settings.toml`, with private paths changed).
+      placeholder: |
+        1. replica init documents
+        2. replica run documents
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: "`replica status --json`"
+      description: The output of `replica status --json`, run from a terminal.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: The run's log
+      description: For a run that went wrong, its log from `logs\runs\` (in `%APPDATA%\Replica\`, or beside the exe for a portable copy). `replica run <job> --json` gives its path as `log`.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Replica version
+      description: From `replica --version`.
+      placeholder: replica 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: From `winver`, such as "Windows 11 24H2".
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it's installed
+      options:
+        - The MSI
+        - The portable zip
+        - Built from source
+    validations:
+      required: true

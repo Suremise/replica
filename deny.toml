@@ -1,0 +1,46 @@
+# cargo-deny: the licence gate and supply-chain checks.
+# Generic on purpose (no project-specific entries), so other projects can copy it.
+
+[graph]
+all-features = true
+# Only what ships: the Windows build. Other platforms' dependencies (such as egui's Linux
+# accessibility stack) are never in the exe.
+targets = ["x86_64-pc-windows-msvc"]
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# MIT or equally permissive only. A dual licence passes when one side is listed.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

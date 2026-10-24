@@ -1,0 +1,156 @@
+# Replica settings. Every key is optional unless it says otherwise: a missing key takes
+# the default shown. Replica rewrites this file when settings change in its window, so
+# comments you add are not kept.
+#
+# This example has two jobs: a versioned backup of a workspace to an external drive and a
+# NAS, and a mirror of a photo folder.
+
+[app]
+# What runs scheduled jobs: "timer" (the tray app's built-in timer, while it runs; the default)
+# or "task-scheduler" (Windows Task Scheduler, so jobs run even when the tray app isn't running).
+schedule_mode = "timer"
+# Start the tray app when you log on to Windows (default false).
+start_with_windows = true
+# Pause all schedules; jobs still run by hand (default false).
+pause_schedules = false
+# A restic.exe to use instead of the one bundled with Replica (default: the bundled one).
+# restic_path = 'C:\Tools\restic.exe'
+# How many days of run logs to keep (default 30).
+log_retention_days = 30
+# How many minutes a job waits for another job to finish with a backup repository they share,
+# before its run fails (default 120). Jobs that share a repository take turns.
+repository_wait_minutes = 120
+
+# Jobs. Each [[jobs]] table is one job; docs/settings.example.toml has examples.
+
+[[jobs]]
+# Required. The job's name, used on the command line: letters, digits, '.', '_' and '-', unique.
+name = "workspace"
+# Whether it runs on its schedule and with run --all (default true).
+enabled = true
+# "versioned" (restic snapshots you can go back to; the default) or "mirror" (an exact copy:
+# deletions and mistakes are copied too).
+mode = "versioned"
+# A mirror job must set this to true, to show you accept that it copies deletions (default false).
+mirror_deletes_confirmed = false
+# A mirror run stops without deleting anything if it would delete more than this percentage of
+# the target's files, such as when a source was emptied by mistake; 100 allows any (default 30).
+mirror_delete_limit_percent = 30
+# When it runs: "daily 02:30", "weekly mon,thu 21:00", "every 6h" or "every 90m". Without one,
+# it runs only by hand.
+schedule = "daily 02:30"
+# Notify when a run succeeds; a failure always notifies (default false).
+notify_on_success = false
+
+# How many snapshots a versioned job keeps (default 7 daily, 4 weekly, 6 monthly), or all of them.
+[jobs.retention]
+# Keep the last snapshot of each of this many days.
+daily = 7
+# Keep the last snapshot of each of this many weeks.
+weekly = 4
+# Keep the last snapshot of each of this many months.
+monthly = 6
+# Keep every snapshot, forever: nothing is ever deleted and the backup grows over time; the counts
+# above are kept for when it's turned off (default false).
+keep_forever = false
+
+# A folder or file to back up. A job needs at least one.
+[[jobs.sources]]
+# Required. An absolute path.
+path = 'D:\Projects'
+# Patterns to leave out, relative to path. A name (node_modules, *.tmp) matches at any depth;
+# a path (build/cache, **/.godot) from path's root. Default none.
+exclude = ["node_modules", "**/.godot", "dist", "out", "*.tmp", "target"]
+
+# Where to back up to. A job needs at least one; several run one after another.
+[[jobs.targets]]
+# Required. "drive" (a folder on a local or external drive) or "unc" (a folder on a NAS share).
+kind = "drive"
+# A name for results and the window (default: the volume and path).
+name = "External HDD"
+# The drive's volume ID, so it's found whatever letter it gets. A drive needs a volume_id or a label.
+volume_id = '\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\'
+# The drive's label, used when there's no volume_id or it doesn't match.
+label = "BACKUP"
+# Required. The folder on the drive, relative to its root.
+path = 'Replica\workspace'
+
+# Where to back up to. A job needs at least one; several run one after another.
+[[jobs.targets]]
+# Required. "drive" (a folder on a local or external drive) or "unc" (a folder on a NAS share).
+kind = "unc"
+# A name for results and the window (default: the path).
+name = "NAS"
+# Required. The UNC path: \\server\share\folder.
+path = '\\nas\backup\replica\workspace'
+# The name of the share's login in Windows Credential Manager. Never the password itself.
+credential = "replica-nas"
+
+# A step before the backup; if it fails, the job fails.
+[[jobs.before]]
+# Required. "sqlite-snapshot" or "command".
+type = "sqlite-snapshot"
+# Required. The live SQLite database. Replica copies it consistently into its own staging
+# folder and backs the copy up instead; the live file and its -wal, -shm and -journal are left out.
+db = 'D:\Projects\app\data\app.db'
+
+# A step after the backup.
+[[jobs.after]]
+# Required. "command" or "verify" (restic check; versioned jobs only).
+type = "verify"
+# When to verify, in the job schedule's syntax (default: after every backup).
+schedule = "weekly sun 03:00"
+# How much stored data to read back: "5%" (the default), "1/10" or a size like "500M".
+read_data_subset = "5%"
+
+[[jobs]]
+# Required. The job's name, used on the command line: letters, digits, '.', '_' and '-', unique.
+name = "photos-mirror"
+# Whether it runs on its schedule and with run --all (default true).
+enabled = true
+# "versioned" (restic snapshots you can go back to; the default) or "mirror" (an exact copy:
+# deletions and mistakes are copied too).
+mode = "mirror"
+# A mirror job must set this to true, to show you accept that it copies deletions (default false).
+mirror_deletes_confirmed = true
+# A mirror run stops without deleting anything if it would delete more than this percentage of
+# the target's files, such as when a source was emptied by mistake; 100 allows any (default 30).
+mirror_delete_limit_percent = 30
+# When it runs: "daily 02:30", "weekly mon,thu 21:00", "every 6h" or "every 90m". Without one,
+# it runs only by hand.
+schedule = "every 6h"
+# Notify when a run succeeds; a failure always notifies (default false).
+notify_on_success = true
+
+# How many snapshots a versioned job keeps (default 7 daily, 4 weekly, 6 monthly), or all of them.
+[jobs.retention]
+# Keep the last snapshot of each of this many days.
+daily = 7
+# Keep the last snapshot of each of this many weeks.
+weekly = 4
+# Keep the last snapshot of each of this many months.
+monthly = 6
+# Keep every snapshot, forever: nothing is ever deleted and the backup grows over time; the counts
+# above are kept for when it's turned off (default false).
+keep_forever = false
+
+# A folder or file to back up. A job needs at least one.
+[[jobs.sources]]
+# Required. An absolute path.
+path = 'D:\Photos'
+# Patterns to leave out, relative to path. A name (node_modules, *.tmp) matches at any depth;
+# a path (build/cache, **/.godot) from path's root. Default none.
+exclude = ["*.tmp", "Thumbs.db"]
+
+# Where to back up to. A job needs at least one; several run one after another.
+[[jobs.targets]]
+# Required. "drive" (a folder on a local or external drive) or "unc" (a folder on a NAS share).
+kind = "drive"
+# A name for results and the window (default: the volume and path).
+# name = "External HDD"
+# The drive's volume ID, so it's found whatever letter it gets. A drive needs a volume_id or a label.
+# volume_id = '\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\'
+# The drive's label, used when there's no volume_id or it doesn't match.
+label = "PHOTOS"
+# Required. The folder on the drive, relative to its root.
+path = 'Mirror\Photos'

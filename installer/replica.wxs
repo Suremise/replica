@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Replica's MSI (WiX v5): per user, no admin, to %LOCALAPPDATA%\Programs\Replica.
+
+  Built by scripts/package.ps1:
+    wix build installer/replica.wxs -arch x64 -d Version=<x.y.z> -d Stage=<folder>
+      -d DowngradeMessage=<text> -d ShortcutDescription=<text> -o <msi>
+  where <folder> holds replica.exe, replica-tray.exe, restic.exe, LICENSE.txt and
+  THIRD-PARTY-NOTICES.txt.
+
+  It uses no WiX extension and no WixUI: their dialogs, bitmaps and custom-action DLLs are MS-RL,
+  and would be embedded in the MSI. Windows shows its own progress window.
+  The custom actions run Replica's own exe.
+
+  Its own text comes from locales/en/installer.ftl: package.ps1 passes it in as the variables
+  DowngradeMessage and ShortcutDescription, and checks the built MSI carries it.
+
+  Public properties (msiexec ... NAME=value):
+    STARTWITHWINDOWS  1 (the default) or 0: whether the tray app starts when you log on. The
+                      tray reads it on its first start, into its own setting.
+
+  An interactive install starts the tray with its window open (LaunchTray below); a silent one
+  (msiexec /i ... /qn) starts nothing.
+
+  Uninstalling removes Replica's scheduled tasks and its Start with Windows entry
+  (replica-tray.exe in its uninstall mode). Settings, history, logs and backups are never removed:
+  they're in %APPDATA%\Replica and on the backup targets, not in the install folder.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Replica"
+      Manufacturer="Darren Marshall"
+      Version="$(var.Version)"
+      UpgradeCode="7EE67228-3C9A-4355-973C-4F638769FBC9"
+      Scope="perUser"
+      Compressed="yes"
+      InstallerVersion="500">
+
+    <!-- Every build has a new ProductCode, often with the same Version: an equal version is an
+         upgrade too, or a rebuilt MSI installs beside the old one (two entries in Apps & features,
+         and equal-version exes the installer won't replace). The old installs are removed first
+         (afterInstallInitialize), so nothing of theirs is left behind. WiX warns ICE61 about
+         same-version upgrades: that's this choice, not a mistake. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="$(var.DowngradeMessage)" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="ReplicaIcon" SourceFile="$(sys.SOURCEFILEDIR)..\assets\icon\replica.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ReplicaIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Suremise/replica" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="STARTWITHWINDOWS" Value="1" Secure="yes" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Replica" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <!-- Per-user components keep their key path in HKCU, as Windows Installer wants. -->
+    <ComponentGroup Id="Files" Directory="INSTALLFOLDER">
+      <Component Id="ReplicaExe" Guid="DBA35E8C-DF0A-46C9-ABFA-6BA3FDEF1D97">
+        <File Id="ReplicaExe" Source="$(var.Stage)\replica.exe" />
+        <RegistryValue Root="HKCU" Key="Software\Replica\Installer" Name="ReplicaExe" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
+        <RemoveFolder Id="RemoveProgramsFolder" Directory="ProgramsFolder" On="uninstall" />
+      </Component>
+      <Component Id="ReplicaTrayExe" Guid="C93979D4-0DEC-466F-92D4-3A092809D52F">
+        <File Id="ReplicaTrayExe" Source="$(var.Stage)\replica-tray.exe" />
+        <RegistryValue Root="HKCU" Key="Software\Replica\Installer" Name="ReplicaTrayExe" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="ResticExe" Guid="A61921A6-14AA-4321-8F1C-3CCE9C74C209">
+        <File Id="ResticExe" Source="$(var.Stage)\restic.exe" />
+        <RegistryValue Root="HKCU" Key="Software\Replica\Installer" Name="ResticExe" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="Licence" Guid="5579BAB7-5EA5-4DF8-927D-C63DF613A188">
+        <File Id="Licence" Source="$(var.Stage)\LICENSE.txt" />
+        <RegistryValue Root="HKCU" Key="Software\Replica\Installer" Name="Licence" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="Notices" Guid="9B1A4F6A-69A8-492A-B93F-F5DE1C90D467">
+        <File Id="Notices" Source="$(var.Stage)\THIRD-PARTY-NOTICES.txt" />
+        <RegistryValue Root="HKCU" Key="Software\Replica\Installer" Name="Notices" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <!-- replica.exe on the user's PATH, so `replica run <job>` works from other apps and a terminal. -->
+      <Component Id="UserPath" Guid="*">
+        <Environment Id="UserPath" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="no" Permanent="no" />
+        <RegistryValue Root="HKCU" Key="Software\Replica\Installer" Name="UserPath" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <!-- The install-time choice the tray reads on its first start. -->
+      <Component Id="StartWithWindowsChoice" Guid="*">
+        <RegistryValue Root="HKCU" Key="Software\Replica\Installer" Name="StartWithWindows" Type="integer" Value="[STARTWITHWINDOWS]" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Shortcuts" Directory="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartMenuShortcut" Name="Replica" Description="$(var.ShortcutDescription)"
+                  Target="[INSTALLFOLDER]replica-tray.exe" WorkingDirectory="INSTALLFOLDER" Icon="ReplicaIcon" />
+        <RegistryValue Root="HKCU" Key="Software\Replica\Installer" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Replica" Level="1">
+      <ComponentGroupRef Id="Files" />
+      <ComponentGroupRef Id="Shortcuts" />
+    </Feature>
+
+    <!-- A running tray holds its exe: it's asked to quit first, on an upgrade or uninstall. -->
+    <CustomAction Id="QuitTray" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]replica-tray.exe&quot; --quit"
+                  Execute="immediate" Return="ignore" />
+    <!-- Uninstall: Replica's scheduled tasks and Start with Windows entry go; nothing else. -->
+    <CustomAction Id="UninstallCleanup" FileRef="ReplicaTrayExe" ExeCommand="--uninstall"
+                  Execute="deferred" Impersonate="yes" Return="ignore" />
+    <!-- After an interactive install or upgrade, the tray starts with its window open, so the
+         user sees it worked. A silent or basic-UI one (/qn, /qb: UILevel 2 or 3) starts nothing. -->
+    <CustomAction Id="LaunchTray" FileRef="ReplicaTrayExe" ExeCommand="--show"
+                  Execute="immediate" Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <Custom Action="QuitTray" Before="InstallValidate" Condition="Installed OR WIX_UPGRADE_DETECTED" />
+      <Custom Action="UninstallCleanup" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="LaunchTray" After="InstallFinalize" Condition="UILevel &gt; 3 AND NOT (REMOVE~=&quot;ALL&quot;)" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

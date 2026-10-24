@@ -1,0 +1,21 @@
+name: Feature request
+description: An idea for something Replica could do, or do better.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The problem, or what you'd like to be able to do, and why. This matters more than a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: How you picture it working, from the command line, the tray or the settings.
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do now
+      description: Any way you get by today, if there is one.

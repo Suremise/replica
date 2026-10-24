@@ -1,0 +1,87 @@
+name: Release
+
+# On a version tag (v0.1.0): check, build the MSI and the portable zip, and draft a GitHub
+# release with them, their SHA-256 checksums and the changelog's section. The draft is
+# published by hand, after the manual checklist in docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build and draft the release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+
+      - name: The tag matches the version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "The tag $env:GITHUB_REF_NAME doesn't match Cargo.toml's version $version."
+          }
+          "VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Fetch the pinned restic
+        shell: pwsh
+        run: ./scripts/fetch-restic.ps1
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: Licences, advisories, sources
+        run: cargo deny check
+
+      - name: Tests
+        run: cargo test --workspace --locked
+        env:
+          REPLICA_REQUIRE_RESTIC: "1"
+
+      - name: Build tools (cargo-about, WiX)
+        shell: pwsh
+        run: |
+          cargo install cargo-about --version 0.9.2 --locked --features cli
+          dotnet tool install --global wix --version 5.0.2
+
+      - name: Build the MSI, the zip and the checksums
+        shell: pwsh
+        # Fails if THIRD-PARTY-NOTICES.txt is out of date.
+        run: ./scripts/package.ps1
+
+      # Signing comes later. When there's a certificate, sign both exes before packaging and the
+      # MSI after, for example:
+      # - name: Sign
+      #   shell: pwsh
+      #   run: signtool sign /fd SHA256 /tr http://timestamp.example /td SHA256 /f cert.pfx `
+      #          /p "${{ secrets.SIGNING_PASSWORD }}" target/dist/*.msi
+
+      - name: The changelog's section
+        shell: pwsh
+        run: |
+          $text = Get-Content -Raw CHANGELOG.md
+          $match = [regex]::Match($text, "(?ms)^## \[$([regex]::Escape($env:VERSION))\][^\n]*\n(.*?)(?=^## \[|\z)")
+          if (-not $match.Success) { throw "CHANGELOG.md has no section for $env:VERSION." }
+          $notes = $match.Groups[1].Value.Trim() + "`n`nCheck a download against SHA256SUMS.txt before running it."
+          Set-Content -Encoding utf8 target/dist/notes.md $notes
+
+      - name: Draft the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME --draft --verify-tag `
+            --title "Replica $env:VERSION" --notes-file target/dist/notes.md `
+            "target/dist/replica-$env:VERSION-x64.msi" `
+            "target/dist/replica-$env:VERSION-portable.zip" `
+            target/dist/SHA256SUMS.txt

@@ -1,0 +1,9 @@
+# The pinned restic release. scripts/fetch-restic.ps1 reads this file.
+# sha256 is restic's official checksum of the zip, from the release's SHA256SUMS:
+# https://github.com/restic/restic/releases/download/v0.19.1/SHA256SUMS
+# exe_sha256 is the checksum of the restic exe inside that zip: a copy already fetched is
+# checked against it every time, so only the official, unmodified exe is used and shipped.
+version=0.19.1
+asset=restic_0.19.1_windows_amd64.zip
+sha256=da948ad707ed690426473aaba2046cd61f8f90f6f0e7dab6be0d5796531de67d
+exe_sha256=b0dd1fd21eea5d8fe1325f55f7118213c21f36de8a261e04c0624a5ab9fd7830

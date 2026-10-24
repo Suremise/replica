@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Nightly: the default tests again, and the stress tests (docs/TESTING.md, Tiers).
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows (fmt, clippy, test, deny, release build)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml picks the pinned toolchain; rustup installs it on first use.
+      - name: Show toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch the pinned restic
+        shell: pwsh
+        run: ./scripts/fetch-restic.ps1
+      - name: Format
+        run: cargo fmt --all --check
+      # Checks clean-build.ps1 in a throwaway workspace: it never touches dist, ui-shots or a junction.
+      # In a child pwsh, so its exit code is the step's: the script's own last child run is one it
+      # expects to fail, which leaves LASTEXITCODE at 1 in the step's session.
+      - name: Clean-build script
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/test-clean-build.ps1
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.149
+      - name: Test
+        run: cargo nextest run --workspace --profile ci
+        env:
+          # Tests that need the pinned restic fail here rather than skip.
+          REPLICA_REQUIRE_RESTIC: "1"
+      # nextest doesn't run doc tests.
+      - name: Doc tests
+        run: cargo test --workspace --doc
+      - name: Stress tests (nightly)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        # The ignored tests but the screenshot harness, which needs a GPU and writes PNGs.
+        run: cargo nextest run --workspace --profile ci --run-ignored only -E "not binary(ui_shots)"
+        env:
+          REPLICA_REQUIRE_RESTIC: "1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: Licences, advisories, sources
+        run: cargo deny check
+      - name: Release build
+        run: cargo build --workspace --release
+
+  core-platform-free:
+    name: Linux (replica-core is platform-free)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      # No restic here: tests that need it skip when it is missing.
+      - name: Test replica-core
+        run: cargo test -p replica-core

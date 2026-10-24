@@ -1,0 +1,16 @@
+PART 1: RUST CRATES
+
+Replica's two exes are built from these crates, under these licences. Each licence's text
+follows the crates that use it.
+{{#each licenses}}
+
+--------------------------------------------------------------------------------
+{{{name}}} ({{{id}}})
+
+Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} <{{{crate.repository}}}>{{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

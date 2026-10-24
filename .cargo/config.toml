@@ -1,0 +1,6 @@
+# The C runtime is linked into the exes, so they need no Visual C++ redistributable:
+# Replica installs per user with no admin rights and runs portable from a USB stick, so it can't
+# rely on one being there. `cc` builds the bundled SQLite to match (/MT). The Universal CRT
+# (api-ms-win-crt-*) is part of Windows 10 and 11.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

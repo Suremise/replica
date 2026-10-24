@@ -1,0 +1,29 @@
+# cargo-nextest's settings. nextest runs every test as its own process, all binaries side
+# by side, so the full suite takes about a third of a minute here instead of 3½ minutes of
+# `cargo test`, which runs the binaries one after another. `cargo test --workspace` still works,
+# and still runs the doc tests, which nextest doesn't. docs/TESTING.md says what to run when.
+
+[store]
+dir = "target/nextest"
+
+[profile.default]
+# A test still running after a minute is reported as slow; after five, it's stopped as hung.
+slow-timeout = { period = "60s", terminate-after = 5 }
+# Every failure in one run, not only the first.
+fail-fast = false
+
+# Tests that must take turns, as their own process each.
+[test-groups]
+# The real Credential Manager under a test prefix: credentials.rs's stores take turns, as its
+# notes say. Other tests that write credentials rely on the per-user named mutex every
+# call holds, as the tray and the command line do side by side.
+credential-manager = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "binary(credentials)"
+test-group = "credential-manager"
+
+# CI: the same tests; a hung test is stopped sooner, so the job isn't held for long.
+[profile.ci]
+fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 3 }
