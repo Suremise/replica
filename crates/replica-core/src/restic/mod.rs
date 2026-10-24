@@ -417,6 +417,51 @@ pub fn snapshot_path(local: &Path) -> String {
     }
 }
 
+/// The sources of a snapshot (its `paths`) that `item`, a path in snapshot form, may be under
+/// by another name: each as the snapshot has it, with the names below it that lead to `item`.
+/// Under a source when it starts with it ignoring case, or when both still lead somewhere on
+/// this PC and where `item` leads is in where the source leads (a short name or a junction).
+fn under_sources(sources: &[String], item: &str) -> Vec<(String, Vec<String>)> {
+    let names = |path: &str| -> Vec<String> {
+        path.split('/')
+            .filter(|n| !n.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let real = |path: &Path| {
+        paths::real_path(path)
+            .ok()
+            .map(|p| snapshot_path(Path::new(&paths::without_verbatim_prefix(&p))))
+    };
+    let item_names = names(item);
+    let real_item = real(&local_path(item)).map(|p| names(&p));
+    let mut found = Vec::new();
+    for source in sources {
+        let root = snapshot_path(Path::new(source));
+        let root_names = names(&root);
+        let starts = |whole: &[String], start: &[String]| {
+            whole.len() >= start.len()
+                && whole
+                    .iter()
+                    .zip(start)
+                    .all(|(a, b)| a.to_lowercase() == b.to_lowercase())
+        };
+        if starts(&item_names, &root_names) {
+            found.push((root.clone(), item_names[root_names.len()..].to_vec()));
+        }
+        let real_root = real(&local_path(&root)).map(|p| names(&p));
+        if let (Some(real_item), Some(real_root)) = (&real_item, real_root)
+            && starts(real_item, &real_root)
+        {
+            let rest = real_item[real_root.len()..].to_vec();
+            if !found.contains(&(root.clone(), rest.clone())) {
+                found.push((root, rest));
+            }
+        }
+    }
+    found
+}
+
 /// Where a path in a snapshot was on disk, the reverse of [`snapshot_path`] for Windows paths:
 /// `/C/Users/x` is `C:\Users\x` and `//nas/share/x` is `\\nas\share\x`. Any other path is a
 /// path as it is (another OS's).
@@ -737,7 +782,7 @@ impl Restic {
         cancel: &CancelToken,
     ) -> Result<RestoreSummary, ResticError> {
         let target = check_restore_target(request)?;
-        let snapshot = self.job_snapshot(repo, request.job, request.snapshot)?;
+        let snapshot = self.find_job_snapshot(repo, request.job, request.snapshot)?;
         self.restore_into(repo, &snapshot, request.item, &target, cancel)
     }
 
@@ -763,7 +808,7 @@ impl Restic {
             }
         }
         let target = check_restore_target(request)?;
-        let snapshot = self.job_snapshot(repo, request.job, request.snapshot)?;
+        let snapshot = self.find_job_snapshot(repo, request.job, request.snapshot)?;
         let mut total = RestoreSummary::default();
         for item in items {
             let done = self.restore_into(repo, &snapshot, Some(item), &target, cancel)?;
@@ -776,12 +821,11 @@ impl Restic {
         Ok(total)
     }
 
-    /// Restores `item` (or the whole snapshot) of the snapshot with the full ID `snapshot` into
-    /// `target`, already checked.
+    /// Restores `item` (or the whole snapshot) of `snapshot` into `target`, already checked.
     fn restore_into(
         &self,
         repo: &Repository,
-        snapshot: &str,
+        snapshot: &Snapshot,
         item: Option<&str>,
         target: &Path,
         cancel: &CancelToken,
@@ -791,21 +835,20 @@ impl Restic {
         match item.map(|i| i.trim_end_matches('/')) {
             Some(item) if !item.is_empty() => {
                 // The item must be in the snapshot: what's already at the target proves nothing.
-                let found = self.ls(repo, snapshot, Some(item))?;
-                if !found.iter().any(|n| n.path.eq_ignore_ascii_case(item)) {
+                let Some(found) = self.find_item(repo, snapshot, item)? else {
                     return Err(ResticError::RestoreNothing {
                         item: item.to_string(),
                     });
-                }
-                let (parent, name) = item.rsplit_once('/').unwrap_or(("", item));
+                };
+                let (parent, name) = found.rsplit_once('/').unwrap_or(("", &found));
                 let parent = if parent.is_empty() { "/" } else { parent };
-                args.push(format!("{snapshot}:{parent}"));
+                args.push(format!("{}:{parent}", snapshot.id));
                 // --include takes a pattern: the name must match only itself.
                 args.push("--include".into());
                 args.push(format!("/{}", crate::exclude::escape_literal(name)));
                 expected = Some(target.join(name));
             }
-            _ => args.push(snapshot.to_string()),
+            _ => args.push(snapshot.id.clone()),
         }
         args.push("--target".into());
         args.push(paths::without_verbatim_prefix(target));
@@ -835,6 +878,68 @@ impl Restic {
         job: &str,
         wanted: &str,
     ) -> Result<String, ResticError> {
+        self.find_job_snapshot(repo, job, wanted).map(|s| s.id)
+    }
+
+    /// Where `item` is in `snapshot`, as the snapshot has it, or `None` if it isn't there.
+    ///
+    /// restic matches paths exactly, and a snapshot keeps its sources as they were typed: a
+    /// source given by its short (8.3) name, in another case or through a junction is kept so,
+    /// and the same file asked for by another of its names isn't found. So when `item` isn't
+    /// there as it is, it is looked for under each source by where it really leads on this PC,
+    /// and then name by name, ignoring case, as Windows does.
+    fn find_item(
+        &self,
+        repo: &Repository,
+        snapshot: &Snapshot,
+        item: &str,
+    ) -> Result<Option<String>, ResticError> {
+        let exact = |path: &str| -> Result<Option<String>, ResticError> {
+            Ok(self
+                .ls(repo, &snapshot.id, Some(path))?
+                .into_iter()
+                .find(|n| n.path.eq_ignore_ascii_case(path))
+                .map(|n| n.path))
+        };
+        if let Some(found) = exact(item)? {
+            return Ok(Some(found));
+        }
+        'roots: for (root, rest) in under_sources(&snapshot.paths, item) {
+            let mut at = root;
+            for name in rest {
+                // A folder's listing has the folder itself first, then what's in it.
+                let children = self.ls(repo, &snapshot.id, Some(&at))?;
+                let children = children.iter().filter(|n| n.path != at);
+                let lower = name.to_lowercase();
+                let mut like = None;
+                for child in children {
+                    if child.name == name {
+                        like = Some(child);
+                        break;
+                    }
+                    if like.is_none() && child.name.to_lowercase() == lower {
+                        like = Some(child);
+                    }
+                }
+                match like {
+                    Some(child) => at = child.path.clone(),
+                    None => continue 'roots,
+                }
+            }
+            if let Some(found) = exact(&at)? {
+                return Ok(Some(found));
+            }
+        }
+        Ok(None)
+    }
+
+    /// One of `job`'s snapshots, found as [`Restic::job_snapshot`] finds its ID.
+    fn find_job_snapshot(
+        &self,
+        repo: &Repository,
+        job: &str,
+        wanted: &str,
+    ) -> Result<Snapshot, ResticError> {
         let snapshots = self.snapshots(repo, Some(job))?;
         let not_found = || ResticError::SnapshotNotFound {
             job: job.to_string(),
@@ -842,17 +947,16 @@ impl Restic {
         };
         if wanted.eq_ignore_ascii_case("latest") {
             return snapshots
-                .iter()
+                .into_iter()
                 .max_by_key(|s| s.time)
-                .map(|s| s.id.clone())
                 .ok_or_else(not_found);
         }
         let wanted_lower = wanted.to_ascii_lowercase();
         let mut matching = snapshots
-            .iter()
+            .into_iter()
             .filter(|s| !wanted.is_empty() && s.id.to_ascii_lowercase().starts_with(&wanted_lower));
         match (matching.next(), matching.next()) {
-            (Some(one), None) => Ok(one.id.clone()),
+            (Some(one), None) => Ok(one),
             _ => Err(not_found()),
         }
     }

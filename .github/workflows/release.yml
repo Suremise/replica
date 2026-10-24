@@ -19,7 +19,7 @@ jobs:
     name: Build and draft the release
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Show toolchain
         run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2

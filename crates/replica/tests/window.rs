@@ -382,6 +382,16 @@ fn step_until<S>(harness: &mut Harness<'_, S>, mut done: impl FnMut(&Harness<'_,
     }
 }
 
+/// Runs the harness until it settles, stepping on while work on other threads keeps it
+/// repainting (a spinner over a load), for at most 10 s.
+fn settle<S>(harness: &mut Harness<'_, S>) {
+    let until = Instant::now() + Duration::from_secs(10);
+    while harness.try_run().is_err() {
+        assert!(Instant::now() < until, "never settled");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 const MIRROR: &str = "Mirror: keeps an exact copy, and deletions are copied too";
 
 #[test]
@@ -2044,10 +2054,10 @@ fn choose_by_accesskit<S>(harness: &mut Harness<'_, S>, name: &str, choice: &str
     harness
         .get_by_role_and_label(Role::ComboBox, name)
         .click_accesskit();
-    harness.run();
+    settle(harness);
     assert!(open(harness), "{name}: opens");
     harness.get_by_label(choice).click_accesskit();
-    harness.run();
+    settle(harness);
     assert!(!open(harness), "{name}: closed once {choice} is chosen");
     assert!(
         harness.query_by_label(other).is_none(),
@@ -2056,12 +2066,12 @@ fn choose_by_accesskit<S>(harness: &mut Harness<'_, S>, name: &str, choice: &str
     harness
         .get_by_role_and_label(Role::ComboBox, name)
         .click_accesskit();
-    harness.run();
+    settle(harness);
     assert!(open(harness), "{name}: opens again");
     harness.get_by_label(other);
     // Choosing what's chosen closes it too.
     harness.get_by_label(choice).click_accesskit();
-    harness.run();
+    settle(harness);
     assert!(!open(harness), "{name}: closed again");
 }
 

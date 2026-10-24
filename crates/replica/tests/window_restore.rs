@@ -187,9 +187,9 @@ fn the_window_restores_a_file_and_a_folder_as_the_cli_does() {
     assert_eq!(snapshots.len(), 1);
     let id = snapshots[0].id.clone();
 
-    // Browsing lists a folder's contents, not the folder itself.
-    let src = snapshot_path(&std::fs::canonicalize(f.path("src")).unwrap());
-    let src = src.trim_start_matches("//?/").to_string();
+    // Browsing lists a folder's contents, not the folder itself. The window starts from the
+    // snapshot's own paths, as they were backed up (a short name on GitHub's runners).
+    let src = snapshot_path(Path::new(&snapshots[0].paths[0]));
     let listed = backend.list(&target, &id, &src).unwrap();
     let mut names: Vec<&str> = listed.iter().map(|n| n.name.as_str()).collect();
     names.sort();
@@ -368,8 +368,10 @@ fn the_window_s_restore_and_test_restore_wait_their_turn() {
     let job = f.job();
     let target = job.targets[0].clone();
     let id = backend.snapshots(&job, &target).unwrap()[0].id.clone();
+    // By where it really leads, which needn't be how the snapshot has it (a short name on
+    // GitHub's runners): restic still finds it.
     let src = snapshot_path(&std::fs::canonicalize(f.path("src")).unwrap());
-    let a = format!("{}/a.txt", src.trim_start_matches("//?/"));
+    let a = format!("{src}/a.txt");
     let to = f.path("turn");
 
     // Waits until the backend says it's waiting, then lets go, and returns what it said.

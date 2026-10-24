@@ -20,7 +20,7 @@ jobs:
     name: Windows (fmt, clippy, test, deny, release build)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # rust-toolchain.toml picks the pinned toolchain; rustup installs it on first use.
       - name: Show toolchain
         run: rustup show active-toolchain
@@ -67,7 +67,7 @@ jobs:
     name: Linux (replica-core is platform-free)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: Swatinem/rust-cache@v2
       # No restic here: tests that need it skip when it is missing.
       - name: Test replica-core

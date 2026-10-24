@@ -389,12 +389,14 @@ fn unreadable_files_make_a_partial_snapshot() {
     f.restic.init(&repo).unwrap();
     f.write("src/ok.txt", "fine");
     f.write("src/busy.txt", "in use");
-    // No sharing: restic can't open it while this handle is open.
+    // No sharing, so restic can't open it while this handle is open; and locked whole, so even
+    // a restic that gets a handle all the same (as an administrator on CI did) can't read it.
     let busy = fs::OpenOptions::new()
         .read(true)
         .share_mode(0)
         .open(f.path("src/busy.txt"))
         .unwrap();
+    busy.lock().unwrap();
     let outcome = f.backup(&repo, "partial", &[f.path("src")]).unwrap();
     drop(busy);
     assert!(outcome.partial);
@@ -561,6 +563,91 @@ fn a_restore_brings_back_exactly_the_named_file_or_folder() {
         "{err:?}"
     );
     assert!(!src.join("restored").exists());
+}
+
+/// A snapshot keeps its source as it was typed. Backed up by its short (8.3) name, as Temp is on
+/// GitHub's runners, a file asked for by its long name, in another case or through a junction is
+/// still found and restored.
+#[cfg(windows)]
+#[test]
+fn a_restore_finds_an_item_by_another_of_its_names() {
+    use std::os::windows::process::CommandExt;
+
+    let Some(f) = Fixture::new() else { return };
+    let repo = f.repo("repo", PASSWORD);
+    f.restic.init(&repo).unwrap();
+    f.write("Long Source Folder/a.txt", "alpha");
+    f.write("Long Source Folder/Sub Folder/b.txt", "beta");
+    let long = f.path("Long Source Folder");
+    // cmd's `%~s` is the short name; the long name again where the volume makes none.
+    let out = Command::new("cmd")
+        .raw_arg(format!(
+            "/C for %I in (\"{}\") do @echo %~sI",
+            long.display()
+        ))
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let short = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    assert!(short.is_dir(), "{}", short.display());
+    if short == long {
+        eprintln!("this volume makes no short names: only case and a junction are tried");
+    }
+    let snapshot = f
+        .backup(&repo, "names", std::slice::from_ref(&short))
+        .unwrap()
+        .summary
+        .snapshot_id;
+    let link = f.path("link");
+    let made = Command::new("cmd")
+        .raw_arg(format!(
+            "/C mklink /J \"{}\" \"{}\"",
+            link.display(),
+            long.display()
+        ))
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "couldn't make a junction");
+
+    let sources = [short.clone()];
+    let restore = |item: &Path, target: &Path| {
+        f.restic.restore(
+            &repo,
+            &RestoreRequest {
+                job: "names",
+                snapshot: &snapshot,
+                item: Some(&snapshot_path(item)),
+                target,
+                sources: &sources,
+                allow_over_source: false,
+            },
+            &CancelToken::new(),
+        )
+    };
+    let upper = PathBuf::from(long.to_string_lossy().to_uppercase());
+    for (i, (item, check, text)) in [
+        (long.join("a.txt"), "a.txt", "alpha"),
+        (upper.join("SUB FOLDER"), "Sub Folder/b.txt", "beta"),
+        (upper.join("sub folder").join("B.TXT"), "b.txt", "beta"),
+        (link.join("Sub Folder"), "Sub Folder/b.txt", "beta"),
+        (short.join("a.txt"), "a.txt", "alpha"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let target = f.path(&format!("restored-{i}"));
+        restore(&item, &target).unwrap_or_else(|e| panic!("{}: {e}", item.display()));
+        assert_eq!(
+            fs::read_to_string(target.join(check)).unwrap(),
+            text,
+            "{}",
+            item.display()
+        );
+    }
+
+    // Still nothing for a name that isn't there by any name.
+    let err = restore(&long.join("missing.txt"), &f.path("restored-missing")).unwrap_err();
+    assert!(matches!(err, ResticError::RestoreNothing { .. }), "{err:?}");
 }
 
 #[test]

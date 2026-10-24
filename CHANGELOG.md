@@ -24,8 +24,9 @@ The first version, in development towards v1.
 - **The command line**, `replica.exe`: `run`, `list`, `status`, `snapshots`, `restore`, `verify`,
   `init`, `key show`, `key set`, `login set`, `export`, `import` and `tasks`, with exit codes for scripts (0 ok, 1 failed, 2 partly done, 3
   skipped, 4 a usage or settings error) and `--json` output for other programs.
-- **Restore** of a file or folder from any of a job's snapshots, into a new or empty folder, and a
-  `HOW-TO-RESTORE.txt` beside each repository for restoring without Replica.
+- **Restore** of a file or folder from any of a job's snapshots, into a new or empty folder, asked
+  for by any of its names (its short 8.3 name, in another case or through a junction) whichever
+  the source was backed up by, and a `HOW-TO-RESTORE.txt` beside each repository for restoring without Replica.
 - **Repository passwords** made by Replica, shown once to be saved, and kept in Windows
   Credential Manager. A saved copy can be put back on a new PC (`replica key set`, or **Enter a
   saved password…** in the window), only once it's checked against the repository.
