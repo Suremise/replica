@@ -54,6 +54,11 @@ jobs:
           cargo install cargo-about --version 0.9.2 --locked --features cli
           dotnet tool install --global wix --version 5.0.2
 
+      # The notices run cargo-about offline, which needs every crate in Cargo.lock, the other
+      # platforms' too; the build and tests only fetched Windows's.
+      - name: Fetch every locked crate
+        run: cargo fetch --locked
+
       - name: Build the MSI, the zip and the checksums
         shell: pwsh
         # Fails if THIRD-PARTY-NOTICES.txt is out of date.
