@@ -42,8 +42,8 @@ cargo nextest run -p replica -E 'binary(window) & test(/history/)'
 
 | Tier | What | Run by |
 |---|---|---|
-| **Default** | Every test that isn't ignored | `cargo nextest run --workspace`; CI on every push and pull request, and nightly |
-| **Stress** | Ignored tests named `stress_…`, with `#[ignore = "stress: …"]`: sweeps and loops too long for every run, whose quick version is in the default tier | `cargo nextest run --workspace --run-ignored only -E 'not binary(ui_shots)'`; CI nightly |
+| **Default** | Every test that isn't ignored | `cargo nextest run --workspace`; CI on every push and pull request |
+| **Stress** | Ignored tests named `stress_…`, with `#[ignore = "stress: …"]`: sweeps and loops too long for every run, whose quick version is in the default tier | `cargo nextest run --workspace --run-ignored only -E 'not binary(ui_shots)'`; CI only when the workflow is run by hand (Actions > CI > Run workflow) |
 | **Screenshots** | `crates/replica/tests/ui_shots.rs`, ignored: renders PNGs for review (ARCHITECTURE, The window) | By hand, on changes to what's on screen |
 
 A test that repeats something many times to catch a rare race, or sweeps many sizes, goes in the

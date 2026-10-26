@@ -4,10 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Run by hand (Actions > CI > Run workflow): the default tests and the stress tests
+  # (docs/TESTING.md, Tiers).
   workflow_dispatch:
-  # Nightly: the default tests again, and the stress tests (docs/TESTING.md, Tiers).
-  schedule:
-    - cron: "17 3 * * *"
 
 permissions:
   contents: read
@@ -49,8 +48,8 @@ jobs:
       # nextest doesn't run doc tests.
       - name: Doc tests
         run: cargo test --workspace --doc
-      - name: Stress tests (nightly)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      - name: Stress tests (manual runs)
+        if: github.event_name == 'workflow_dispatch'
         # The ignored tests but the screenshot harness, which needs a GPU and writes PNGs.
         run: cargo nextest run --workspace --profile ci --run-ignored only -E "not binary(ui_shots)"
         env:
