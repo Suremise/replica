@@ -1,9 +1,27 @@
 name: CI
 
 on:
+  # A push or pull request that changes only these files doesn't run CI: none of them is read by
+  # a build, a test or a script CI runs. Not here, as they are: CHANGELOG.md (the release notes),
+  # LICENSE (packaged and shown in About), docs/settings.example.toml (a test reads it), the
+  # icons, locales, sources, Cargo files and workflows. One changed file outside the list runs it.
   push:
     branches: [main]
+    paths-ignore: &docs-only
+      - README.md
+      - CONTRIBUTING.md
+      - SECURITY.md
+      - CODE_OF_CONDUCT.md
+      - AGENTS.md
+      - CLAUDE.md
+      - docs/**/*.md
+      - docs/screenshots/**
+      - assets/README.md
+      - assets/preview.png
+      - .github/ISSUE_TEMPLATE/**
+      - .github/pull_request_template.md
   pull_request:
+    paths-ignore: *docs-only
   # Run by hand (Actions > CI > Run workflow): the default tests and the stress tests
   # (docs/TESTING.md, Tiers).
   workflow_dispatch:

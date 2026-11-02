@@ -33,7 +33,8 @@ compiled dependencies (`-All` removes everything cargo built). docs/TESTING.md, 
 the numbers.
 
 A pull request must pass all of these: the CI runs them on Windows, and runs `replica-core`'s
-tests on Linux too.
+tests on Linux too. A push or pull request that changes only docs and pictures (the list is in
+`.github/workflows/ci.yml`, `paths-ignore`) doesn't run CI.
 
 **restic.** Replica bundles a pinned restic release. `scripts/fetch-restic.ps1` reads
 `third_party/restic/VERSION`, downloads that release and checks it against its pinned SHA-256; it
