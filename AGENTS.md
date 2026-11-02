@@ -17,8 +17,9 @@ whichever CLI runs it: Codex reads this file, and Claude Code reads it through `
 squashed commit** (`git merge --squash <branch>`, then one commit), never a merge commit. Its
 message is for the public: a short summary line, then what changed and why. No card or issue
 numbers (GitHub links `#n` to its issues), no people's names, no review rounds and no wording
-about the tools or agents that made it. Commit as the repository's usual identity (its no-reply
-address). The round-by-round commits stay on your branch; once merged, reset your branch to the
+about the tools or agents that made it. That rule is for the message's text only: the
+`Co-Authored-By:` trailer at its end stays, on every commit. Never strip it, or rebuild commits
+to remove it, before a push. Commit as the repository's usual identity (its no-reply address). The round-by-round commits stay on your branch; once merged, reset your branch to the
 new main so the next piece of work starts from it.
 
 **Disk space** ([docs/TESTING.md](docs/TESTING.md#disk-space)): cargo never removes old test
