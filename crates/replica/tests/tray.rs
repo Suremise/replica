@@ -12,6 +12,11 @@ use replica_core::run::Outcome;
 use replica_core::settings::Settings;
 use replica_win::scheduler::Scheduler;
 
+#[path = "../../replica-win/tests/support/test_credentials.rs"]
+mod test_credentials;
+
+use test_credentials::TestCredentials;
+
 /// The `[app]` line that turns the Task Scheduler option on.
 const TASK_SCHEDULER: &str = "schedule_mode = \"task-scheduler\"";
 
@@ -364,11 +369,10 @@ fn the_real_tray_opens_hides_shows_and_quits_with_nothing_of_an_installed_one_to
     use replica_win::autostart::{AutoStart, RUN_KEY, test_key};
     use replica_win::window::{post_close, process_windows};
 
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let tag = format!("ReplicaTest-{}-{nanos}-tray", std::process::id());
+    // Its name, `ReplicaTest-<pid>-<nanos>-tray`, is its Credential Manager prefix too: emptied
+    // when the test ends, pass or fail.
+    let credentials = TestCredentials::new("tray");
+    let tag = credentials.tag().to_owned();
     let p = Portable::new(&format!("{TASK_SCHEDULER}\nstart_with_windows = true"));
     let app = p.temp.path().join("app");
     let settings_file = app.join("settings.toml");

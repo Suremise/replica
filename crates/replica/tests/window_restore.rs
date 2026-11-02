@@ -25,9 +25,16 @@ use replica_win::credentials::CredentialManager;
 use replica_win::paths::AppPaths;
 use replica_win::scheduler::Scheduler;
 
+#[path = "../../replica-win/tests/support/test_credentials.rs"]
+mod test_credentials;
+
+use test_credentials::TestCredentials;
+
 struct Fixture {
     temp: tempfile::TempDir,
     prefix: String,
+    /// Its Credential Manager prefix, emptied when the fixture is dropped, pass or fail.
+    _credentials: TestCredentials,
 }
 
 impl Fixture {
@@ -43,8 +50,10 @@ impl Fixture {
         }
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("appdata/Replica")).unwrap();
+        let credentials = TestCredentials::new(name);
         Some(Fixture {
-            prefix: format!("ReplicaTest-{}-{name}/", std::process::id()),
+            prefix: credentials.prefix().to_owned(),
+            _credentials: credentials,
             temp,
         })
     }
@@ -144,15 +153,6 @@ impl Fixture {
             .settings
             .jobs
             .remove(0)
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let store = CredentialManager::with_prefix(&self.prefix);
-        for name in store.names().unwrap_or_default() {
-            let _ = store.delete(&name);
-        }
     }
 }
 

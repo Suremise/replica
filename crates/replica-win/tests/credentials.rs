@@ -10,30 +10,27 @@
 #![cfg(windows)]
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, Once};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Mutex, MutexGuard};
+use std::time::Duration;
 
 use replica_core::job::{Target, VolumeRef};
 use replica_core::platform::{Credential, Secret, SecretStore};
 use replica_win::credentials::CredentialManager;
 use replica_win::keys;
 
-/// Every test store's names start with this.
-const TEST_PREFIX: &str = "ReplicaTest-";
-/// A test store older than this is from a run that was killed: no run lasts this long.
-const STALE: Duration = Duration::from_secs(60 * 60);
+#[path = "support/test_credentials.rs"]
+mod test_credentials;
 
-fn now() -> Duration {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
-}
+use test_credentials::{EmptyOnDrop, Names, STALE, TestCredentials, is_stale};
 
 /// One test store at a time (see the module's notes).
 static TURN: Mutex<()> = Mutex::new(());
 
-/// A Credential Manager under `ReplicaTest-<pid>-<time>-<test>/`, emptied when dropped. It
-/// holds [`TURN`] (its second field) until then: fields drop after `Drop::drop` has run.
+/// A Credential Manager under the test's own prefix ([`TestCredentials`]), emptied when
+/// dropped. It holds [`TURN`] until then: fields drop in order, the guard last.
 struct TestStore(
     CredentialManager,
+    #[allow(dead_code)] TestCredentials,
     #[allow(dead_code)] MutexGuard<'static, ()>,
 );
 
@@ -41,47 +38,8 @@ impl TestStore {
     fn new(test: &str) -> Self {
         // A test that panicked holding it poisons it; its store was still cleaned up.
         let turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-        static SWEEP: Once = Once::new();
-        SWEEP.call_once(sweep_stale);
-        let nanos = now().as_nanos();
-        let prefix = format!("{TEST_PREFIX}{}-{nanos}-{test}/", std::process::id());
-        Self(CredentialManager::with_prefix(&prefix), turn)
-    }
-}
-
-/// Deletes the test credentials (`ReplicaTest-<pid>-<time>-…`) made over [`STALE`] ago. Only
-/// names of that shape: anything else under `ReplicaTest-` is left alone.
-fn sweep_stale() {
-    let all = CredentialManager::with_prefix(TEST_PREFIX);
-    for name in all.names().unwrap_or_default() {
-        if made_before(&name, now().saturating_sub(STALE)) {
-            let _ = all.delete(&name);
-        }
-    }
-}
-
-/// Whether `name` (after `ReplicaTest-`) is `<pid>-<nanos>-…` with its time before `cutoff`.
-fn made_before(name: &str, cutoff: Duration) -> bool {
-    let mut parts = name.splitn(3, '-');
-    let (Some(pid), Some(nanos), Some(_)) = (parts.next(), parts.next(), parts.next()) else {
-        return false;
-    };
-    pid.parse::<u32>().is_ok()
-        && nanos
-            .parse::<u64>()
-            .is_ok_and(|n| Duration::from_nanos(n) < cutoff)
-}
-
-impl Drop for TestStore {
-    fn drop(&mut self) {
-        for name in self.0.names().unwrap_or_default() {
-            let _ = self.0.delete(&name);
-        }
-        let left = self.0.names().unwrap_or_default();
-        // Not an assert in Drop (it could hide the test's own failure); this one is visible.
-        if !left.is_empty() {
-            eprintln!("test credentials left behind: {left:?}");
-        }
+        let credentials = TestCredentials::new(test);
+        Self(credentials.store(), credentials, turn)
     }
 }
 
@@ -167,12 +125,187 @@ fn a_store_from_a_killed_run_is_swept_and_others_are_not() {
     let cutoff = Duration::from_secs(1_800_000_000);
     let old = (cutoff - hour).as_nanos();
     let new = (cutoff + hour).as_nanos();
-    assert!(made_before(&format!("123-{old}-keys/repo"), cutoff));
-    assert!(!made_before(&format!("123-{new}-keys/repo"), cutoff));
-    // Shapes the sweep doesn't own: the CLI's `ReplicaTest-<pid>-<test>/` and anything else.
-    assert!(!made_before("123-roundtrip/repo", cutoff));
-    assert!(!made_before("x-1-keys", cutoff));
-    assert!(!made_before("", cutoff));
+    let me = std::process::id();
+    // A running test's: never stale, unless it's older than any test lasts.
+    assert!(!is_stale(&format!("{me}-{new}-keys/repo"), cutoff));
+    assert!(!is_stale(
+        &format!("{me}-{new}-repolock-two-runs/nas"),
+        cutoff
+    ));
+    assert!(is_stale(&format!("{me}-{old}-keys/repo"), cutoff));
+    // An ended process's: stale however new. (No process has ID 3: IDs are multiples of 4.)
+    assert!(is_stale(&format!("3-{new}-keys/repo"), cutoff));
+    // Shapes no test makes any more, such as `ReplicaTest-<pid>-<test>/`: stale.
+    assert!(is_stale("39376-login/nas-login", cutoff));
+    assert!(is_stale("x-1-keys", cutoff));
+    assert!(is_stale(&format!("{me}-{new}-/x"), cutoff), "no name");
+    assert_eq!(STALE, hour);
+}
+
+/// A test that leaves a credential fails itself, whenever in the run it ends (its
+/// `TestCredentials` panics on drop), so this one is for what a killed run left: any stale test
+/// credential (one whose test has ended). It's removed here too, so the next run starts clean,
+/// and named, so the test that left it can be found. A Credential Manager that can't be listed
+/// fails it: that's no proof of a clean one. Only `ReplicaTest-…` names: Replica's own
+/// `Replica/…` credentials are never read or touched.
+#[test]
+fn no_test_credentials_are_left_behind() {
+    let left = test_credentials::stale().unwrap();
+    let swept = test_credentials::sweep(|_| true);
+    assert!(
+        left.is_empty(),
+        "test credentials left behind (now removed: {swept:?}): {left:?}"
+    );
+}
+
+/// A stand-in store whose every call fails, as a busy or broken Credential Manager's would.
+struct Broken;
+
+impl Names for Broken {
+    fn list(&self) -> Result<Vec<String>, String> {
+        Err("busy".into())
+    }
+
+    fn remove(&self, _: &str) -> Result<(), String> {
+        Err("busy".into())
+    }
+}
+
+/// The real store under a prefix, whose deletes do nothing: a cleanup that can't remove.
+struct NoDelete(CredentialManager);
+
+impl Names for NoDelete {
+    fn list(&self) -> Result<Vec<String>, String> {
+        self.0.list()
+    }
+
+    fn remove(&self, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_store_that_cant_be_listed_is_never_taken_for_a_clean_one() {
+    let cutoff = Duration::from_secs(1_800_000_000);
+    assert!(test_credentials::stale_in(&Broken, cutoff).is_err());
+    assert!(test_credentials::sweep_in(&Broken, cutoff, |_| true).is_err());
+    assert!(test_credentials::empty(&Broken).is_err());
+
+    // A cleanup that can't list fails the test, as one that can't delete does.
+    let result = std::panic::catch_unwind(|| {
+        drop(TestCredentials::with_cleanup("broken", |_| {
+            Box::new(Broken)
+        }));
+    });
+    let message = panic_text(result.unwrap_err());
+    assert!(message.contains("left behind"), "{message}");
+    assert!(
+        message.contains("couldn't list the test credentials: busy"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_test_that_leaves_a_credential_fails_and_says_which() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let prefix = Mutex::new(String::new());
+    // A second, working cleanup, in place before the probe is written: the probe is removed
+    // however this test ends, failing assertions and unwraps below included.
+    let _cleanup = EmptyOnDrop(&prefix);
+    // The test itself passes; its own cleanup can't remove what it wrote.
+    let result = std::panic::catch_unwind(|| {
+        let leaky = TestCredentials::with_cleanup("leaky", |prefix| {
+            Box::new(NoDelete(CredentialManager::with_prefix(prefix)))
+        });
+        *prefix.lock().unwrap() = leaky.prefix().to_owned();
+        leaky.store().set("probe", &login(None, "x")).unwrap();
+    });
+    let prefix = prefix.lock().unwrap().clone();
+    // The real probe is still there, as the failure says.
+    let left = CredentialManager::with_prefix(&prefix).names().ok();
+    let message = result.err().map(panic_text).unwrap_or_default();
+    assert!(
+        message.contains("left behind"),
+        "the test didn't fail: {message:?}"
+    );
+    assert!(
+        message.contains(&prefix) && message.contains("probe"),
+        "{message}"
+    );
+    assert_eq!(left, Some(vec!["probe".to_string()]));
+}
+
+/// Busy for its first `busy` lists, then the names it holds; a removal sticks or doesn't.
+struct Flaky {
+    busy: Mutex<usize>,
+    names: Mutex<Vec<String>>,
+    sticks: bool,
+}
+
+impl Flaky {
+    fn new(busy: usize, sticks: bool) -> Self {
+        Flaky {
+            busy: Mutex::new(busy),
+            names: Mutex::new(vec!["probe".into()]),
+            sticks,
+        }
+    }
+}
+
+impl Names for Flaky {
+    fn list(&self) -> Result<Vec<String>, String> {
+        let mut busy = self.busy.lock().unwrap();
+        if *busy > 0 {
+            *busy -= 1;
+            return Err("busy".into());
+        }
+        Ok(self.names.lock().unwrap().clone())
+    }
+
+    fn remove(&self, name: &str) -> Result<(), String> {
+        if self.sticks {
+            self.names.lock().unwrap().retain(|n| n != name);
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn a_cleanup_is_clean_only_when_it_s_seen_to_be() {
+    // Busy until its last round, whose delete works: the final look sees it empty.
+    let late = Flaky::new(test_credentials::ATTEMPTS - 1, true);
+    assert_eq!(test_credentials::empty(&late), Ok(()));
+    assert!(late.names.lock().unwrap().is_empty());
+    // Busy every round, so nothing was deleted: the final look says what's there.
+    let never = Flaky::new(test_credentials::ATTEMPTS, true);
+    assert_eq!(
+        test_credentials::empty(&never),
+        Err(r#"["probe"]"#.to_string())
+    );
+    // Deletes that never stick.
+    let stuck = Flaky::new(0, false);
+    assert_eq!(
+        test_credentials::empty(&stuck),
+        Err(r#"["probe"]"#.to_string())
+    );
+}
+
+#[test]
+fn a_failing_test_keeps_its_own_failure_when_its_cleanup_fails_too() {
+    let result = std::panic::catch_unwind(|| {
+        let _store = TestCredentials::with_cleanup("both", |_| Box::new(Broken));
+        panic!("the test's own failure");
+    });
+    // Not an abort, and not the cleanup's panic: the test's (the leftover goes to stderr).
+    assert_eq!(panic_text(result.unwrap_err()), "the test's own failure");
+}
+
+fn panic_text(payload: Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap_or_default()
 }
 
 #[test]

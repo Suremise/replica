@@ -2,8 +2,8 @@
 //! tray, so nothing real is touched:
 //!
 //! - the app's folder is a temp folder (or the one given), with `settings.toml` in it;
-//! - Credential Manager entries go under `ReplicaTest-<pid>-window/`, and Task Scheduler tasks
-//!   in `\ReplicaTest-<pid>-window`, both removed when it ends. To open jobs `replica.exe` set
+//! - Credential Manager entries go under `ReplicaTest-<pid>-<time>-window/`, and Task Scheduler
+//!   tasks in `\ReplicaTest-<pid>-<time>-window`, both removed when it ends. To open jobs `replica.exe` set
 //!   up, give it their `ReplicaTest-…` prefix in `REPLICA_CREDENTIAL_PREFIX`: that prefix is
 //!   used and left for its owner to remove;
 //! - "Run" requests are printed, not run.
@@ -37,7 +37,13 @@ fn main() {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| temp.path().to_path_buf());
     let paths = AppPaths::resolve("Replica", &folder, Some(&folder)).expect("the app's folder");
-    let tag = format!("ReplicaTest-{}-window", std::process::id());
+    // The tests' shape (`ReplicaTest-<pid>-<nanos>-<name>`), so their leftover check knows it's
+    // live while this runs and stale if it was killed.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tag = format!("ReplicaTest-{}-{nanos}-window", std::process::id());
     // A test prefix of `replica.exe`'s (`REPLICA_CREDENTIAL_PREFIX`), to open jobs it set up.
     let prefix = std::env::var(replica::cli::CREDENTIAL_PREFIX_VAR)
         .ok()

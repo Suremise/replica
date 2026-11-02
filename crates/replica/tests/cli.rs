@@ -18,9 +18,16 @@ use std::process::{Command, Stdio};
 use replica_core::platform::SecretStore;
 use replica_win::credentials::CredentialManager;
 
+#[path = "../../replica-win/tests/support/test_credentials.rs"]
+mod test_credentials;
+
+use test_credentials::TestCredentials;
+
 struct Fixture {
     temp: tempfile::TempDir,
     prefix: String,
+    /// Its Credential Manager prefix, emptied when the fixture is dropped, pass or fail.
+    _credentials: TestCredentials,
     restic: Option<PathBuf>,
 }
 
@@ -28,8 +35,10 @@ impl Fixture {
     fn new(name: &str) -> Fixture {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("appdata/Replica")).unwrap();
+        let credentials = TestCredentials::new(name);
         Fixture {
-            prefix: format!("ReplicaTest-{}-{name}/", std::process::id()),
+            prefix: credentials.prefix().to_owned(),
+            _credentials: credentials,
             restic: restic(),
             temp,
         }
@@ -115,15 +124,6 @@ impl Fixture {
         let (code, out, err) = self.replica(args, "");
         assert!(code == 0 || code == 3, "{args:?}: {code}\n{out}\n{err}");
         serde_json::from_str(&out).unwrap_or_else(|e| panic!("{args:?}: {e}\n{out}"))
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let store = CredentialManager::with_prefix(&self.prefix);
-        for name in store.names().unwrap_or_default() {
-            let _ = store.delete(&name);
-        }
     }
 }
 

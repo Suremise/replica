@@ -16,9 +16,13 @@ use replica::ui::backend::{Backend, LiveBackend, UiRequest};
 use replica::ui::settings::{Confirm, SettingsTab};
 use replica_core::job::{Job, Source, Target, VolumeRef};
 use replica_core::settings::{ScheduleMode, Settings};
-use replica_win::credentials::CredentialManager;
 use replica_win::paths::AppPaths;
 use replica_win::scheduler::Scheduler;
+
+#[path = "../../replica-win/tests/support/test_credentials.rs"]
+mod test_credentials;
+
+use test_credentials::TestCredentials;
 
 /// A test-only task folder, `\ReplicaTest-<pid>-<time>-<test>`, emptied and removed when
 /// dropped. Made before any task is, so a setup that fails part-way still cleans up.
@@ -49,8 +53,10 @@ struct Fixture {
     temp: tempfile::TempDir,
     backend: Arc<LiveBackend>,
     requests: Mutex<Receiver<UiRequest>>,
-    /// Last, so it's dropped after the backend that uses its folder.
+    /// After the backend that uses its folder, so it's dropped after it.
     tasks: TaskFolder,
+    /// Its Credential Manager prefix, emptied after the backend is gone.
+    _credentials: TestCredentials,
 }
 
 fn job(name: &str, schedule: &str) -> Job {
@@ -79,6 +85,7 @@ impl Fixture {
     fn new(test: &str) -> Fixture {
         // The cleanup first: everything below may fail after a task is made.
         let tasks = TaskFolder::new(test);
+        let credentials = TestCredentials::new(test);
         let scheduler = tasks.0.clone();
         let temp = tempfile::tempdir().unwrap();
         let paths = AppPaths::resolve(
@@ -92,11 +99,7 @@ impl Fixture {
             paths,
             send,
             Arc::default(),
-            CredentialManager::with_prefix(&format!(
-                "ReplicaTest-{}{}/",
-                std::process::id(),
-                scheduler.folder().trim_start_matches(r"\ReplicaTest")
-            )),
+            credentials.store(),
             scheduler.clone(),
         ));
         let mut settings = Settings {
@@ -113,6 +116,7 @@ impl Fixture {
             backend,
             requests: Mutex::new(requests),
             tasks,
+            _credentials: credentials,
         }
     }
 

@@ -18,11 +18,14 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-use replica_core::platform::SecretStore;
 use replica_core::repo_lock::{RepositoryLocks, lock_key};
 use replica_core::settings::Settings;
-use replica_win::credentials::CredentialManager;
 use replica_win::repo_locks::NamedMutexLocks;
+
+#[path = "../../replica-win/tests/support/test_credentials.rs"]
+mod test_credentials;
+
+use test_credentials::TestCredentials;
 
 /// How long a test waits for a run to say something before it gives up: generous, for a slow
 /// machine; it never waits this long when things work.
@@ -31,6 +34,8 @@ const LIMIT: Duration = Duration::from_secs(120);
 struct Fixture {
     temp: tempfile::TempDir,
     prefix: String,
+    /// Its Credential Manager prefix, emptied when the fixture is dropped, pass or fail.
+    _credentials: TestCredentials,
     restic: PathBuf,
 }
 
@@ -42,8 +47,10 @@ impl Fixture {
         std::fs::create_dir_all(temp.path().join("localappdata")).unwrap();
         std::fs::create_dir_all(temp.path().join("src")).unwrap();
         std::fs::write(temp.path().join("src/a.txt"), "a").unwrap();
+        let credentials = TestCredentials::new(&format!("repolock-{name}"));
         Some(Fixture {
-            prefix: format!("ReplicaTest-{}-repolock-{name}/", std::process::id()),
+            prefix: credentials.prefix().to_owned(),
+            _credentials: credentials,
             restic,
             temp,
         })
@@ -159,15 +166,6 @@ impl Fixture {
             lines,
             seen: Vec::new(),
             readers,
-        }
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let store = CredentialManager::with_prefix(&self.prefix);
-        for name in store.names().unwrap_or_default() {
-            let _ = store.delete(&name);
         }
     }
 }

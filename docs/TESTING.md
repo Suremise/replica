@@ -62,8 +62,8 @@ test as its own process, so an in-process `Mutex` doesn't make tests take turns)
   notes).
 
 Everything else shares what it uses safely, each test under names of its own: Credential Manager
-under a per-test prefix (every call takes a per-user named mutex), Task Scheduler in a
-per-test `\ReplicaTest-<pid>-…` folder, temp folders, `APPDATA` per test.
+under a per-test prefix (`TestCredentials`, below; every call takes a per-user named mutex),
+Task Scheduler in a per-test `\ReplicaTest-<pid>-…` folder, temp folders, `APPDATA` per test.
 
 ## What to run when
 
@@ -99,6 +99,23 @@ default tier in a second terminal, for the load.) Log both runs where the review
   was too short (`with_a_started_program` in `command_tree.rs`).
 - **Clean up, even on failure.** Temp folders, test-only Credential Manager prefixes and Task
   Scheduler folders are removed in `Drop`, so a failed assertion still cleans up.
+- **Credential Manager: an in-memory store, else `TestCredentials`.** A test that only needs
+  secrets uses `MemorySecretStore`. One that must use the real Credential Manager (it tests the
+  API, or runs a real `replica.exe` or tray, which can't share an in-memory store) takes its
+  prefix from `TestCredentials::new(name)` (`crates/replica-win/tests/support/test_credentials.rs`,
+  included with `#[path]`), never a name of its own making:
+  - its names are `ReplicaTest-<pid>-<nanos>-<name>/…`, never `Replica/…`, which is the user's;
+  - dropping it empties the prefix, pass or panic, retrying while Credential Manager is busy.
+    If anything is left, or the prefix can't even be listed, the drop panics: the test that left
+    it fails, whenever in the run it ends. (A test already failing keeps its own failure, and
+    the leftover goes to stderr.)
+  - starting it sweeps stale credentials of tests of that name: a test credential is stale when
+    the process that made it has ended, or it's over an hour old, so another checkout's suite
+    running at the same time is never swept;
+  - `no_test_credentials_are_left_behind` (`replica-win`'s `credentials.rs`) is for what a
+    killed run left: it fails on any stale `ReplicaTest-…` credential, names it and removes it.
+    It reads only `ReplicaTest-…` names, and a Credential Manager it can't list fails it too:
+    an unreadable list is never taken for an empty one.
 - **Pass under load,** not only alone: every test runs beside about 400 others.
 - **Press what layout can move through AccessKit** (`click_accesskit`), as a screen reader does;
   a pointer click (`click`) is for what the click itself tests.

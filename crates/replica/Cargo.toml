@@ -44,6 +44,9 @@ tempfile.workspace = true
 # never in the exe.
 egui_kittest = { workspace = true, features = ["wgpu"] }
 image = { workspace = true, features = ["png"] }
+# The tests' Credential Manager helper (replica-win/tests/support/test_credentials.rs) asks
+# whether a test's process is still running. Dev-only: never in the exe.
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [lints]
 workspace = true

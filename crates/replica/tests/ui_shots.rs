@@ -42,9 +42,13 @@ use replica::ui::shell::{Shell, Tab};
 use replica_core::job::{AfterStep, BeforeStep, Job, Mode, Source, Target, VolumeRef};
 use replica_core::run::Outcome;
 use replica_core::settings::{ScheduleMode, Settings};
-use replica_win::credentials::CredentialManager;
 use replica_win::paths::AppPaths;
 use replica_win::scheduler::{ScheduledTask, Scheduler};
+
+#[path = "../../replica-win/tests/support/test_credentials.rs"]
+mod test_credentials;
+
+use test_credentials::TestCredentials;
 
 /// One way a screen is shot.
 #[derive(Debug, Clone, Copy)]
@@ -128,6 +132,8 @@ struct Fixture {
     _temp: tempfile::TempDir,
     backend: Arc<Faked>,
     _requests: Receiver<UiRequest>,
+    /// Its Credential Manager prefix, emptied last, when the fixture is dropped.
+    _credentials: TestCredentials,
 }
 
 fn job(name: &str, schedule: &str, mode: Mode, source: &str, label: &str) -> Job {
@@ -179,12 +185,13 @@ impl Fixture {
         )
         .unwrap();
         let (send, requests) = channel();
-        let tag = format!("ReplicaTest-{}-ui-shots", std::process::id());
+        let credentials = TestCredentials::new("ui-shots");
+        let tag = credentials.tag().to_owned();
         let live = Arc::new(LiveBackend::with(
             paths,
             send,
             Arc::default(),
-            CredentialManager::with_prefix(&format!("{tag}/")),
+            credentials.store(),
             Scheduler::in_folder(&format!(r"\{tag}")),
         ));
         let backend = Arc::new(data(Faked::new(live, Vec::new())));
@@ -207,6 +214,7 @@ impl Fixture {
             _temp: temp,
             backend,
             _requests: requests,
+            _credentials: credentials,
         }
     }
 
@@ -289,12 +297,13 @@ impl Fixture {
         )
         .unwrap();
         let (send, requests) = channel();
-        let tag = format!("ReplicaTest-{}-ui-shots", std::process::id());
+        let credentials = TestCredentials::new("ui-shots");
+        let tag = credentials.tag().to_owned();
         let live = Arc::new(LiveBackend::with(
             paths,
             send,
             Arc::new(Mutex::new(status)),
-            CredentialManager::with_prefix(&format!("{tag}/")),
+            credentials.store(),
             Scheduler::in_folder(&format!(r"\{tag}")),
         ));
         let backend = Arc::new(data(Faked::new(live, Vec::new())));
@@ -308,6 +317,7 @@ impl Fixture {
             _temp: temp,
             backend,
             _requests: requests,
+            _credentials: credentials,
         }
     }
 
