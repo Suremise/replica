@@ -2,7 +2,8 @@
 
 # Replica
 
-[![CI](https://github.com/Suremise/replica/actions/workflows/ci.yml/badge.svg)](https://github.com/Suremise/replica/actions/workflows/ci.yml)
+[![CI](https://github.com/Suremise/replica/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Suremise/replica/actions/workflows/ci.yml)
+[![Release](https://github.com/Suremise/replica/actions/workflows/release.yml/badge.svg)](https://github.com/Suremise/replica/actions/workflows/release.yml)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 
 **Versioned backups for Windows that run by themselves, and tell you when they didn't.**
