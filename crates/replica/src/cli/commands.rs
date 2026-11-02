@@ -181,6 +181,10 @@ fn print_report(report: &RunReport, out: Output) {
                 reason = reason
             )),
         }
+        // A mirror's clashes, all of them, each saying what to do.
+        for clash in &t.clashes {
+            out.warn(&tr!("cli-run-clash", clash = clash.advice()));
+        }
     }
     let total = report.targets.len();
     let ok = report
@@ -241,6 +245,7 @@ fn job_json(r: &RunReport) -> json::JobRun {
                 files: t.files,
                 bytes: t.bytes,
                 snapshot_id: t.snapshot_id.clone(),
+                clashes: t.clashes.iter().map(|c| c.advice()).collect(),
             })
             .collect(),
     }

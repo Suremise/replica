@@ -224,10 +224,21 @@ docs list the rules; in short:
   files at once. Read-only files are copied and replaced. Files aren't flushed to disk before the
   rename (it would cost several times the run time on 50,000 files); NTFS keeps the rename itself
   consistent. A staging file left by a crash is an extra, so the next run removes it.
-- **Type conflicts are refused (a deliberate choice for v1):** where the source has a file and the
-  target a folder, or the other way round, at any depth, the target's item is left exactly as it is
-  (nothing renamed or deleted there, nor under it) and reported as "type conflict: resolve by hand",
-  a "partly" result. Everything else still mirrors. Replacing automatically may come later.
+- **Clashes are never resolved automatically (a deliberate choice):** where the source has a file
+  and the target a folder, or the other way round, at any depth, the target's item is left exactly
+  as it is (nothing renamed or deleted there, nor under it). Deleting a folder to make way for a
+  file is the riskiest thing a backup tool can do, for a rare case (names without extensions,
+  `.git` as a file in a worktree, apps that turn a document into a folder). What Replica does is
+  say so clearly: the plan already walks the whole tree, so every clash is collected as it goes, at
+  no extra cost (`MirrorOutcome::clashes`), and reported together once the run ends. The target's
+  reason gives the count; each clash is a line of its own with the mirror's path, what it is in
+  each place and what to do (`MirrorClash::advice`). The run log and `replica run` (and its JSON)
+  list them all, History keeps them all (`run_targets.clashes`) and shows them in the run's
+  details. The notification, a failed run's too, gives the count and points to History, then the
+  first clash if there's room: a notification holds 255 UTF-16 units, so the first's path is
+  shortened in the middle (`D:\…\photos\notes`) to keep its name and what to do, and a failure's
+  own text is cut to leave room for the count (`tray::state::notification_for`). The result is
+  "partly"; everything else still mirrors.
 - **Cancelling** stops between files (and between chunks of a large file): each file already in
   place is complete, staging files are removed, and so are the new folders still empty.
 - **Comparing:** size and modified time within 2 seconds (FAT and exFAT keep 2-second times), or the
@@ -408,7 +419,8 @@ CLI and the tray. The pieces:
 - **The run history** (`history::History`, `history.db` in the data folder the caller chooses):
   SQLite with typed tables (`runs`, `run_targets`, `verifies`), versioned with `PRAGMA user_version`
   and migrated in transactions on open (3: `run_targets.skipped`, each target's count of files
-  it couldn't back up or copy, NULL in older rows). `recent(job, limit)` for History and `replica status`,
+  it couldn't back up or copy, NULL in older rows; 4: `run_targets.clashes`, a mirror's clashes,
+  each saying what to do, one a line, NULL when it had none). `recent(job, limit)` for History and `replica status`,
   `last_success(job)` (the latest run in which a target backed up or mirrored, its own result ok
   or partly; a run whose targets were all skipped or failed doesn't count, whatever its steps did)
   for "overdue", and `last_verify` /

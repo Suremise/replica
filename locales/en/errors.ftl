@@ -161,7 +161,15 @@ error-mirror-too-many-deletions = Nothing was changed: this run would delete { $
 error-mirror-io = { $path } couldn't be read or made: { $detail }
 error-mirror-destination-link = { $path } is a link or junction. A mirror never writes through one, so nothing was changed; remove it, or point the job at another folder.
 error-mirror-parent-not-made = its folder in the mirror couldn't be made.
-error-mirror-type-conflict = type conflict: resolve by hand. It's a file in one place and a folder in the other, so the mirror left it as it is.
+# A clash: a file in the source and a folder of the same name in the mirror, or the other way
+# round. The mirror leaves it as it is. $path: the item in the mirror; $name: its name.
+error-mirror-clash-folder = { $path } is a folder, but the source has a file { $name }: delete or rename the folder in the mirror, then run again.
+error-mirror-clash-file = { $path } is a file, but the source has a folder { $name }: delete or rename the file in the mirror, then run again.
+# $count: how many items clash. Said once the run ends, before the list.
+error-mirror-clashes = { $count ->
+    [one] 1 item is a file in one place and a folder in the other, so the mirror left it as it is.
+   *[other] { $count } items are a file in one place and a folder in the other, so the mirror left them as they are.
+}
 
 ## Running a job: steps, SQLite snapshots, the run lock and the history
 

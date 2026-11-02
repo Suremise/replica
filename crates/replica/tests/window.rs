@@ -993,6 +993,7 @@ fn run_record(id: i64, job: &str, outcome: Outcome) -> RunRecord {
             reason: (outcome == Outcome::Skipped).then(|| "the target isn't available".into()),
             snapshot_id: None,
             skipped: Some(0),
+            clashes: Vec::new(),
         }],
     }
 }
@@ -1076,6 +1077,40 @@ fn a_partly_done_run_says_how_many_files_it_skipped_unless_its_row_is_older() {
         "the row's chip and the target's in the details"
     );
     harness.get_by_label_contains("3 files couldn't be backed up.");
+}
+
+#[test]
+fn a_mirror_run_s_details_list_every_clash_with_what_to_do() {
+    let (fake, _dir) = backend(vec![]);
+    let mut run = run_record(1, "photos", Outcome::Partly);
+    let clashes = [
+        r"D:\Mirror\photos\notes is a folder, but the source has a file notes: delete or rename the folder in the mirror, then run again.",
+        r"D:\Mirror\photos\raw\.git is a file, but the source has a folder .git: delete or rename the file in the mirror, then run again.",
+    ];
+    run.targets[0].mode = "mirror".into();
+    run.targets[0].skipped = Some(2);
+    run.targets[0].reason = Some(
+        "2 items are a file in one place and a folder in the other, so the mirror left them as they are."
+            .into(),
+    );
+    run.targets[0].clashes = clashes.iter().map(|c| c.to_string()).collect();
+    *fake.runs.lock().unwrap() = vec![run];
+    let mut harness = history_harness(&fake);
+    harness.run();
+    // Found by the search too.
+    harness.get_by_label_contains("photos").click();
+    harness.run();
+    harness.get_by_label_contains("2 items are a file in one place");
+    for clash in clashes {
+        harness.get_by_label(clash);
+    }
+    assert!(
+        harness.state().shown()[0]
+            .details_text()
+            .contains(clashes[1]),
+        "copied with the details"
+    );
+    harness.check_accessibility();
 }
 
 #[test]

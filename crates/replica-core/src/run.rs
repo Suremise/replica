@@ -60,7 +60,7 @@ use crate::exclude::ExcludeRules;
 use crate::history::History;
 use crate::i18n::tr;
 use crate::job::{AfterStep, BeforeStep, Job, Mode, Target};
-use crate::mirror::{self, Compare, MirrorProgress, MirrorRequest};
+use crate::mirror::{self, Compare, MirrorClash, MirrorProgress, MirrorRequest};
 use crate::platform::{ProcessTree, SecretStore, TargetLocation, TargetResolver, resolve_target};
 use crate::repo_lock::{self, RepositoryLocks, Wait, Waited};
 use crate::restic::{BackupProgress, BackupRequest, Repository, Restic, ResticError};
@@ -241,8 +241,11 @@ pub struct TargetReport {
     pub files: u64,
     pub bytes: u64,
     pub snapshot_id: Option<String>,
-    /// The files that couldn't be backed up or copied.
+    /// The files that couldn't be backed up or copied, clashes included.
     pub problems: Vec<String>,
+    /// A mirror's clashes (a file in one place, a folder in the other): left as they are, and
+    /// listed once the run ends, each saying what to do ([`MirrorClash::advice`]).
+    pub clashes: Vec<MirrorClash>,
 }
 
 /// A finished run.
@@ -765,6 +768,7 @@ fn target_report(
         bytes: 0,
         snapshot_id: None,
         problems: Vec::new(),
+        clashes: Vec::new(),
     }
 }
 
@@ -908,10 +912,24 @@ fn run_target(
                             .iter()
                             .map(|f| format!("{}: {}", f.path.display(), f.message))
                             .collect();
-                        t.reason = Some(tr!("error-run-unreadable", count = t.problems.len()));
                         for p in &t.problems {
                             log.line(&format!("problem: {p}"));
                         }
+                        // Every clash, together, once the run ends: each says what to do.
+                        t.clashes = outcome.clashes.clone();
+                        let advice: Vec<String> = t.clashes.iter().map(|c| c.advice()).collect();
+                        for a in &advice {
+                            log.line(&format!("clash: {a}"));
+                        }
+                        let mut why = Vec::new();
+                        if !outcome.failed.is_empty() {
+                            why.push(tr!("error-run-unreadable", count = outcome.failed.len()));
+                        }
+                        if !t.clashes.is_empty() {
+                            why.push(tr!("error-mirror-clashes", count = t.clashes.len()));
+                        }
+                        t.reason = Some(why.join(" "));
+                        t.problems.extend(advice);
                     }
                     (t, None)
                 }

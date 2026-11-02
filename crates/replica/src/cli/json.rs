@@ -54,6 +54,9 @@ pub struct TargetRun {
     pub files: u64,
     pub bytes: u64,
     pub snapshot_id: Option<String>,
+    /// A mirror's clashes, each saying what to do; left out when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub clashes: Vec<String>,
 }
 
 /// `replica list --json` and `replica status --json`.

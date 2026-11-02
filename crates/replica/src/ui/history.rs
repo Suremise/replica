@@ -141,6 +141,9 @@ impl Entry {
             Entry::Run(r) => {
                 for t in &r.targets {
                     text.extend([" ", t.reason.as_deref().unwrap_or("")]);
+                    for c in &t.clashes {
+                        text.extend([" ", c.as_str()]);
+                    }
                 }
                 text.extend([" ", r.error.as_deref().unwrap_or("")]);
             }
@@ -184,6 +187,7 @@ impl Entry {
                         line = tr!("history-target-why", line = line, reason = reason.as_str());
                     }
                     lines.push(line);
+                    lines.extend(t.clashes.iter().cloned());
                 }
                 lines.extend(r.error.clone());
                 lines.extend(r.log_path.as_ref().map(|p| p.display().to_string()));
@@ -821,7 +825,8 @@ fn target_line(t: &replica_core::history::TargetRecord) -> String {
     )
 }
 
-/// A run's targets, each with its result and why it was skipped or failed, then its error.
+/// A run's targets, each with its result and why it was skipped or failed, and a mirror's
+/// clashes, each saying what to do; then the run's error.
 fn run_details(ui: &mut Ui, run: &RunRecord) {
     for t in &run.targets {
         let name = tr!(
@@ -842,6 +847,9 @@ fn run_details(ui: &mut Ui, run: &RunRecord) {
                 &result_text(t.outcome, t.skipped),
             )
         });
+        for clash in &t.clashes {
+            ui.label(clash);
+        }
     }
     if let Some(error) = &run.error {
         ui.add_space(space::S);

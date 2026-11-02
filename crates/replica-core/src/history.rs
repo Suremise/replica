@@ -63,6 +63,8 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX test_restores_job_started ON test_restores (job, started_at);",
     // 3: how many files each target couldn't back up or copy; NULL in older rows.
     "ALTER TABLE run_targets ADD COLUMN skipped INTEGER;",
+    // 4: a mirror's clashes, each saying what to do, one a line; NULL when it had none.
+    "ALTER TABLE run_targets ADD COLUMN clashes TEXT;",
 ];
 
 /// The history database.
@@ -110,6 +112,8 @@ pub struct TargetRecord {
     /// How many files it couldn't back up or copy; `None` in a row recorded before the
     /// history kept the count.
     pub skipped: Option<u64>,
+    /// A mirror's clashes (a file in one place, a folder in the other), each saying what to do.
+    pub clashes: Vec<String>,
 }
 
 /// A test restore as the history keeps it: some files of a snapshot restored and compared with
@@ -222,8 +226,8 @@ impl History {
         let id = tx.last_insert_rowid();
         for (position, t) in report.targets.iter().enumerate() {
             tx.execute(
-                "INSERT INTO run_targets (run_id, position, target, mode, outcome, files, bytes, reason, snapshot_id, skipped)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                "INSERT INTO run_targets (run_id, position, target, mode, outcome, files, bytes, reason, snapshot_id, skipped, clashes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     id,
                     position as i64,
@@ -235,6 +239,7 @@ impl History {
                     t.reason,
                     t.snapshot_id,
                     t.problems.len() as i64,
+                    (!t.clashes.is_empty()).then(|| t.clashes.iter().map(|c| c.advice()).collect::<Vec<_>>().join("\n")),
                 ],
             )?;
         }
@@ -285,7 +290,7 @@ impl History {
 
     fn targets_of(&self, run_id: i64) -> Result<Vec<TargetRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT target, mode, outcome, files, bytes, reason, snapshot_id, skipped
+            "SELECT target, mode, outcome, files, bytes, reason, snapshot_id, skipped, clashes
              FROM run_targets WHERE run_id = ?1 ORDER BY position",
         )?;
         let rows = stmt.query_map([run_id], |r| {
@@ -298,6 +303,10 @@ impl History {
                 reason: r.get(5)?,
                 snapshot_id: r.get(6)?,
                 skipped: r.get::<_, Option<i64>>(7)?.map(|n| n as u64),
+                clashes: r
+                    .get::<_, Option<String>>(8)?
+                    .map(|c| c.lines().map(str::to_owned).collect())
+                    .unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -426,6 +435,7 @@ impl From<&TargetReport> for TargetRecord {
             reason: t.reason.clone(),
             snapshot_id: t.snapshot_id.clone(),
             skipped: Some(t.problems.len() as u64),
+            clashes: t.clashes.iter().map(|c| c.advice()).collect(),
         }
     }
 }
@@ -456,6 +466,10 @@ mod tests {
         assert_eq!(history.version().unwrap(), MIGRATIONS.len());
         let old = &history.recent(Some("old"), 1).unwrap()[0];
         assert_eq!(old.targets[0].skipped, None);
+        assert!(
+            old.targets[0].clashes.is_empty(),
+            "no clashes column before"
+        );
         assert_eq!(old.skipped(), None);
         assert_eq!(old.outcome, Outcome::Partly);
     }

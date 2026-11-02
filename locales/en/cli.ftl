@@ -162,6 +162,8 @@ cli-duration-seconds = { $s } s
 cli-duration-minutes = { $min } min { $s } s
 cli-run-job-or-all = Name a job, or use --all, but not both.
 cli-run-target-partly = { $job } → { $target }: partly done, { $reason }
+# One of a mirror's clashes, under its target's line: $clash says where, and what to do.
+cli-run-clash = {"  "}{ $clash }
 cli-status-running-job = { $job } is running.
 cli-not-versioned = { $job } is a mirror: this works only for versioned jobs.
 cli-no-target = None of { $job }'s targets could be used.

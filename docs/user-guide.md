@@ -43,8 +43,11 @@ no older version to go back to. So:
   `mirror_deletes_confirmed = true` in the settings file) makes it one;
 - a mirror run stops, deleting nothing, if it would delete more than a set share of the target's
   files (30% unless you change it), as when a source folder was emptied by mistake;
-- a file that turned into a folder (or the other way round) is reported as a type conflict and
-  left alone, for you to sort out by hand.
+- a file that turned into a folder (or the other way round) is never replaced automatically: the
+  mirror leaves it as it is, and once the run ends it lists every such clash, each with what to do
+  (for example "`D:\Mirror\notes` is a folder, but the source has a file `notes`: delete or
+  rename the folder in the mirror, then run again"). The notification shows the first, and the
+  run's details in History show them all.
 
 **Use versioned for anything you care about.** Use a mirror only as a second, convenient copy of
 something that's also backed up with versions.

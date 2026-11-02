@@ -89,6 +89,9 @@ ok), and `run --all`'s is the worst of its jobs'.
 - `targets[].files`, `bytes`: for a versioned target, the new and changed files and the bytes
   added to the repository; for a mirror, the files copied and their bytes.
 - `targets[].snapshot_id`: the new snapshot (versioned targets), else `null`.
+- `targets[].clashes`: a mirror's clashes (a file in the source and a folder of that name in the
+  mirror, or the other way round), left as they are: each a sentence with the mirror's path, what
+  it is in each place and what to do. Left out when there are none.
 
 ## `replica list --json` and `replica status --json`
 

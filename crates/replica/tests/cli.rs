@@ -332,6 +332,64 @@ fn a_missing_target_is_exit_3_and_run_all_takes_the_worst() {
 }
 
 #[test]
+fn a_mirror_run_lists_its_clashes_with_what_to_do() {
+    let f = Fixture::new("clashes");
+    f.write("src/a.txt", "a");
+    // A file in the source where the mirror has a folder, and the other way round, deeper.
+    f.write("src/notes", "a file in the source");
+    f.write("drive/mirror/src/notes/old.txt", "a folder in the mirror");
+    f.write("src/deep/dir/inner.txt", "a folder in the source");
+    f.write("drive/mirror/src/deep/dir", "a file in the mirror");
+    f.settings(&format!(
+        "[[jobs]]\nname = \"copy\"\nmode = \"mirror\"\nmirror_deletes_confirmed = true\n\
+         [[jobs.sources]]\npath = '{src}'\n[[jobs.targets]]\n{target}\n",
+        src = f.path("src").display(),
+        target = f.drive_target("drive/mirror"),
+    ));
+    let (code, _, err) = f.replica(&["run", "copy"], "");
+    assert_eq!(code, 2, "partly done: {err}");
+    assert!(
+        err.contains("2 items are a file in one place and a folder in the other"),
+        "{err}"
+    );
+    let notes = r"\drive\mirror\src\notes is a folder, but the source has a file notes: delete or rename the folder in the mirror, then run again.";
+    let dir = r"\drive\mirror\src\deep\dir is a file, but the source has a folder dir: delete or rename the file in the mirror, then run again.";
+    assert!(err.contains(notes), "{err}");
+    assert!(err.contains(dir), "{err}");
+    // The clashes' paths are as people write them. (The target's own name here is its volume's
+    // GUID path: this test's drive has no label.)
+    assert!(
+        err.lines()
+            .filter(|l| l.contains(", but the source has a"))
+            .all(|l| !l.contains(r"\\?\")),
+        "no long-path prefix: {err}"
+    );
+    // Nothing that clashes was touched.
+    assert_eq!(
+        std::fs::read_to_string(f.path("drive/mirror/src/notes/old.txt")).unwrap(),
+        "a folder in the mirror"
+    );
+    assert_eq!(
+        std::fs::read_to_string(f.path("drive/mirror/src/deep/dir")).unwrap(),
+        "a file in the mirror"
+    );
+
+    // The JSON carries the list too.
+    let (code, out, err) = f.replica(&["run", "copy", "--json"], "");
+    assert_eq!(code, 2, "{err}");
+    let run: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let clashes: Vec<&str> = run["jobs"][0]["targets"][0]["clashes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap())
+        .collect();
+    assert_eq!(clashes.len(), 2, "{clashes:?}");
+    assert!(clashes.iter().any(|c| c.ends_with(notes)), "{clashes:?}");
+    assert!(clashes.iter().any(|c| c.ends_with(dir)), "{clashes:?}");
+}
+
+#[test]
 fn usage_and_settings_errors_are_exit_4() {
     let f = Fixture::new("usage");
     f.settings("[app\n");

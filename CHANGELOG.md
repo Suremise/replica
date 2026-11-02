@@ -6,6 +6,13 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- A mirror run that finds a file in one place and a folder of the same name in the other still
+  leaves it as it is, and now lists every such clash together once the run ends, each saying what
+  to do (delete or rename the item in the mirror, then run again). History's run details and
+  `replica run` show them all, and the notification shows the first.
+
 ### Fixed
 
 - The tray icon's tooltip could stop showing on hover after the icon changed state or showed

@@ -93,6 +93,7 @@ impl Faked {
                 },
                 snapshot_id: None,
                 skipped: Some(if outcome == Outcome::Partly { 3 } else { 0 }),
+                clashes: Vec::new(),
             }],
         };
         *self.runs.lock().unwrap() = vec![
@@ -132,6 +133,7 @@ impl Faked {
             reason,
             snapshot_id: None,
             skipped: Some(if outcome == Outcome::Partly { 12 } else { 0 }),
+            clashes: Vec::new(),
         };
         let run = |id: i64, job: &str, hours: i64, outcome: Outcome, targets| RunRecord {
             id,

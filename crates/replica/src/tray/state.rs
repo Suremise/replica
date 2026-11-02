@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, NaiveDate, TimeZone};
 use replica_core::i18n::tr;
 use replica_core::job::Job;
+use replica_core::mirror::MirrorClash;
 use replica_core::platform::{Level, Notification};
 use replica_core::run::{Outcome, RunReport};
 use replica_core::schedule::DEFAULT_GRACE;
@@ -117,6 +118,8 @@ pub fn notification_for(report: &RunReport, job: Option<&Job>) -> Option<Notific
         title,
         body,
     };
+    // A mirror's clashes, whatever the run's result: a failed target elsewhere mustn't hide them.
+    let clashes: Vec<&MirrorClash> = report.targets.iter().flat_map(|t| &t.clashes).collect();
     match report.outcome {
         Outcome::Failed => {
             let blamed = report.targets.iter().find(|t| t.outcome == Outcome::Failed);
@@ -129,21 +132,36 @@ pub fn notification_for(report: &RunReport, job: Option<&Job>) -> Option<Notific
                 (None, Some(error)) => tr!("notify-run-failed-reason", reason = error.as_str()),
                 (None, None) => String::new(),
             };
+            // The failure first; the clashes' count and where to find them always fit after it.
+            let room = NOTIFICATION_UNITS.saturating_sub(units(&body) + 1);
+            let body = match clash_note(&clashes, room) {
+                Some(note) if body.is_empty() => note,
+                Some(note) => {
+                    let room = NOTIFICATION_UNITS.saturating_sub(units(&note) + 1);
+                    format!("{}\n{note}", cut(&body, room))
+                }
+                None => body,
+            };
             Some(note(
                 Level::Error,
                 tr!("notify-run-failed-title", job = name),
                 body,
             ))
         }
-        Outcome::Partly => Some(note(
-            Level::Warning,
-            tr!("notify-run-partly-title", job = name),
-            tr!(
-                "notify-run-partly-body",
-                ok = ok,
-                total = report.targets.len()
-            ),
-        )),
+        Outcome::Partly => {
+            let body = clash_note(&clashes, NOTIFICATION_UNITS).unwrap_or_else(|| {
+                tr!(
+                    "notify-run-partly-body",
+                    ok = ok,
+                    total = report.targets.len()
+                )
+            });
+            Some(note(
+                Level::Warning,
+                tr!("notify-run-partly-title", job = name),
+                body,
+            ))
+        }
         Outcome::Ok if job.is_some_and(|j| j.notify_on_success) => Some(note(
             Level::Success,
             tr!("notify-run-ok-title", job = name),
@@ -151,6 +169,85 @@ pub fn notification_for(report: &RunReport, job: Option<&Job>) -> Option<Notific
         )),
         Outcome::Ok | Outcome::Skipped => None,
     }
+}
+
+/// What a notification's text holds: `szInfo`'s 256 UTF-16 units, less the closing NUL. Windows
+/// cuts anything longer.
+pub const NOTIFICATION_UNITS: usize = 255;
+
+fn units(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+/// `text` cut to at most `max` UTF-16 units, ending in "…" where it was cut.
+fn cut(text: &str, max: usize) -> String {
+    if units(text) <= max {
+        return text.to_owned();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in text.chars() {
+        if used + c.len_utf16() + 1 > max {
+            break;
+        }
+        used += c.len_utf16();
+        out.push(c);
+    }
+    out.push('…');
+    out
+}
+
+/// `path` in at most `max` UTF-16 units: whole if it fits, else its first part and as many of
+/// its last parts as fit, with "…" between (`D:\…\photos\notes`). `None` if even its first
+/// part and its name don't fit.
+fn shorten_path(path: &str, max: usize) -> Option<String> {
+    if units(path) <= max {
+        return Some(path.to_owned());
+    }
+    let parts: Vec<&str> = path.split('\\').collect();
+    // The first part: a drive (`D:`), or a share's `\\server\share`.
+    let share = path.starts_with(r"\\") && parts.len() > 4;
+    let kept = if share { 4 } else { 1 };
+    let head = parts[..kept].join("\\");
+    let gap = r"\…\";
+    let mut tail = String::new();
+    for part in parts[kept..].iter().rev() {
+        let longer = if tail.is_empty() {
+            part.to_string()
+        } else {
+            format!(r"{part}\{tail}")
+        };
+        if units(&head) + units(gap) + units(&longer) > max {
+            break;
+        }
+        tail = longer;
+    }
+    (!tail.is_empty()).then(|| format!("{head}{gap}{tail}"))
+}
+
+/// A notification's word on a mirror's clashes, in at most `max` UTF-16 units: how many, that
+/// History lists them with what to do, and the first, its path shortened to fit; the first is
+/// left out when even that won't fit. `None` without clashes, or with no room for the count.
+fn clash_note(clashes: &[&MirrorClash], max: usize) -> Option<String> {
+    let first = clashes.first()?;
+    let head = tr!("notify-run-clashes", count = clashes.len());
+    let max = max.max(units(&head));
+    let room = max.saturating_sub(units(&head) + 1);
+    let full = first.advice();
+    let line = if units(&full) <= room {
+        Some(full)
+    } else {
+        // The advice around the path stays whole: shorten the path alone.
+        let shown = first.shown_path();
+        let around = units(&full) - units(&shown);
+        room.checked_sub(around)
+            .and_then(|space| shorten_path(&shown, space))
+            .map(|path| first.advice_at(&path))
+    };
+    Some(match line {
+        Some(line) => format!("{head}\n{line}"),
+        None => head,
+    })
 }
 
 /// What the tooltip says.
@@ -210,7 +307,10 @@ impl Tooltip<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
     use chrono::{FixedOffset, TimeDelta};
+    use replica_core::mirror::ClashKind;
     use replica_core::run::TargetReport;
 
     fn clock(s: &str) -> DateTime<FixedOffset> {
@@ -431,6 +531,7 @@ mod tests {
                     bytes: 0,
                     snapshot_id: None,
                     problems: Vec::new(),
+                    clashes: Vec::new(),
                 })
                 .collect(),
             log_path: None,
@@ -470,6 +571,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(partly.level, Level::Warning);
+        assert_eq!(
+            partly.body,
+            tr!("notify-run-partly-body", ok = 1, total = 2)
+        );
 
         let ok = report(Outcome::Ok, &[(Outcome::Ok, "")]);
         assert!(notification_for(&ok, Some(&quiet)).is_none());
@@ -479,6 +584,140 @@ mod tests {
         );
         let skipped = report(Outcome::Skipped, &[(Outcome::Skipped, "not connected")]);
         assert!(notification_for(&skipped, Some(&chatty)).is_none());
+    }
+
+    fn clash(path: &str, in_mirror: ClashKind) -> MirrorClash {
+        MirrorClash {
+            path: PathBuf::from(path),
+            in_mirror,
+        }
+    }
+
+    /// `D:\Mirror\` and `projects\` 22 times, then `notes`: a valid path of 213 characters,
+    /// whose advice alone is longer than a notification holds.
+    fn long_path() -> String {
+        format!(r"D:\Mirror\{}notes", r"projects\".repeat(22))
+    }
+
+    const FOLDER_ACTION: &str = "delete or rename the folder in the mirror, then run again.";
+
+    #[test]
+    fn a_mirror_s_clashes_are_counted_and_the_first_shown_and_it_all_fits() {
+        let quiet = job("daily 02:30");
+        let partly = |clashes: Vec<MirrorClash>| {
+            let mut r = report(Outcome::Partly, &[(Outcome::Partly, "clashes")]);
+            r.targets[0].clashes = clashes;
+            notification_for(&r, Some(&quiet)).unwrap()
+        };
+
+        // One short one: the count and where to look, then it whole.
+        let one = partly(vec![clash(r"D:\Mirror\notes", ClashKind::Folder)]);
+        assert_eq!(one.level, Level::Warning);
+        assert_eq!(
+            one.body,
+            format!(
+                "{}\n{}",
+                tr!("notify-run-clashes", count = 1),
+                clash(r"D:\Mirror\notes", ClashKind::Folder).advice()
+            )
+        );
+
+        // Several: how many, that History lists them all, and the first.
+        let two = partly(vec![
+            clash(r"D:\Mirror\notes", ClashKind::Folder),
+            clash(r"D:\Mirror\x", ClashKind::File),
+        ]);
+        assert!(two.body.starts_with("2 items are"), "{}", two.body);
+        assert!(two.body.contains("History lists them all"), "{}", two.body);
+        assert!(two.body.ends_with(FOLDER_ACTION), "{}", two.body);
+        assert!(!two.body.contains(r"D:\Mirror\x"), "only the first");
+
+        // A long path, alone or with others: still within what a notification holds, with
+        // where to look, the item's name and what to do; the path is shortened in the middle.
+        for count in [1, 5] {
+            let mut clashes = vec![clash(&long_path(), ClashKind::Folder)];
+            clashes.extend((1..count).map(|i| clash(&format!(r"D:\Mirror\{i}"), ClashKind::File)));
+            assert!(clashes[0].advice().encode_utf16().count() > NOTIFICATION_UNITS);
+            let body = partly(clashes).body;
+            assert!(
+                body.encode_utf16().count() <= NOTIFICATION_UNITS,
+                "{} units: {body}",
+                body.encode_utf16().count()
+            );
+            assert!(body.contains("History"), "{body}");
+            assert!(body.contains(r"D:\…\"), "{body}");
+            assert!(body.contains(r"projects\notes is a folder"), "{body}");
+            assert!(body.contains("a file notes"), "{body}");
+            assert!(body.ends_with(FOLDER_ACTION), "{body}");
+        }
+    }
+
+    #[test]
+    fn a_failed_run_still_tells_of_its_clashes_within_the_limit() {
+        let quiet = job("daily 02:30");
+        let failed = |reason: &str| {
+            let mut r = report(
+                Outcome::Failed,
+                &[(Outcome::Partly, "clashes"), (Outcome::Failed, reason)],
+            );
+            r.targets[0].clashes = vec![
+                clash(r"D:\Mirror\notes", ClashKind::Folder),
+                clash(r"D:\Mirror\x", ClashKind::File),
+            ];
+            notification_for(&r, Some(&quiet)).unwrap()
+        };
+
+        // The failure first, as before, then the clashes.
+        let note = failed("wrong password");
+        assert_eq!(note.level, Level::Error);
+        assert_eq!(note.title, tr!("notify-run-failed-title", job = "hive"));
+        assert!(
+            note.body.starts_with("nas: wrong password\n"),
+            "{}",
+            note.body
+        );
+        assert!(note.body.contains("2 items are"), "{}", note.body);
+        assert!(
+            note.body.contains("History lists them all"),
+            "{}",
+            note.body
+        );
+
+        // A long failure gives way enough for the clashes' count and where to look.
+        let long = "the deletion guard refused it ".repeat(12);
+        let note = failed(&long);
+        assert!(
+            note.body.encode_utf16().count() <= NOTIFICATION_UNITS,
+            "{}",
+            note.body
+        );
+        assert!(
+            note.body.starts_with("nas: the deletion guard"),
+            "{}",
+            note.body
+        );
+        assert!(note.body.contains("…\n2 items are"), "{}", note.body);
+        assert!(
+            note.body.contains("History lists them all"),
+            "{}",
+            note.body
+        );
+    }
+
+    #[test]
+    fn a_path_is_shortened_in_the_middle_keeping_its_start_and_name() {
+        assert_eq!(shorten_path(r"D:\a\b", 50).as_deref(), Some(r"D:\a\b"));
+        assert_eq!(
+            shorten_path(r"D:\Mirror\long\er\notes", 16).as_deref(),
+            Some(r"D:\…\er\notes")
+        );
+        assert_eq!(
+            shorten_path(r"\\nas\share\a\b\c\notes", 22).as_deref(),
+            Some(r"\\nas\share\…\c\notes")
+        );
+        assert_eq!(shorten_path(r"D:\Mirror\a-very-long-name", 10), None);
+        assert_eq!(cut("abcdef", 4), "abc…");
+        assert_eq!(cut("abc", 4), "abc");
     }
 
     #[test]

@@ -17,10 +17,12 @@
 //!   created for this copy alone, so it can never be an existing file or a hard link to one.
 //!   Only once it's complete is it renamed into place, so a half-copied file never replaces a
 //!   good one. The modified time is copied; a read-only file stays read-only.
-//! - **A type conflict** (a file in the source where the target has a folder, or the other way
-//!   round, at any depth) is reported as "type conflict: resolve by hand" and the target's item
-//!   is left exactly as it is (deliberately, for v1). The rest of the tree still
-//!   mirrors; the run is "partly done".
+//! - **A clash** (a file in the source where the target has a folder, or the other way round, at
+//!   any depth) leaves the target's item, and everything under it, exactly as it is: deleting a
+//!   folder to make way for a file is the riskiest thing a backup tool can do, for a rare case.
+//!   Every clash in the run is collected as the tree is planned ([`MirrorOutcome::clashes`]) and
+//!   reported together at the end, each with what to do ([`MirrorClash::advice`]). The rest of
+//!   the tree still mirrors; the run is "partly done".
 //! - **Cancelling** stops between files, and in a large file between chunks. Each file already
 //!   in place is complete; staging files are removed, and so are new folders still empty.
 //! - **Comparing:** size and modified time (within [`TIME_TOLERANCE`], for FAT and exFAT drives),
@@ -107,6 +109,51 @@ pub struct MirrorFailure {
     pub message: String,
 }
 
+/// What a clashing item is in the mirror: the source has the other kind of item there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClashKind {
+    /// A file in the mirror, a folder in the source.
+    File,
+    /// A folder in the mirror, a file in the source.
+    Folder,
+}
+
+/// An item that's a file in the source and a folder in the mirror, or the other way round. The
+/// mirror's item, and everything under it, is left as it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirrorClash {
+    /// The item in the mirror.
+    pub path: PathBuf,
+    /// What it is in the mirror.
+    pub in_mirror: ClashKind,
+}
+
+impl MirrorClash {
+    /// What the user reads: where it is (without a `\\?\` prefix), what it is in each place,
+    /// and what to do.
+    pub fn advice(&self) -> String {
+        self.advice_at(&self.shown_path())
+    }
+
+    /// Its path as people write it: without the long-path prefix.
+    pub fn shown_path(&self) -> String {
+        paths::without_verbatim_prefix(&self.path)
+    }
+
+    /// [`Self::advice`], showing `path` for the item (a shortened one, where room is short).
+    pub fn advice_at(&self, path: &str) -> String {
+        let name = self
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_owned());
+        match self.in_mirror {
+            ClashKind::Folder => tr!("error-mirror-clash-folder", path = path, name = name),
+            ClashKind::File => tr!("error-mirror-clash-file", path = path, name = name),
+        }
+    }
+}
+
 /// What a mirror run did.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MirrorOutcome {
@@ -116,14 +163,16 @@ pub struct MirrorOutcome {
     /// Links and junctions in the sources, which aren't followed.
     pub skipped: u64,
     pub failed: Vec<MirrorFailure>,
+    /// Items that are a file in one place and a folder in the other: left as they are.
+    pub clashes: Vec<MirrorClash>,
     pub bytes_copied: u64,
     pub duration: Duration,
 }
 
 impl MirrorOutcome {
-    /// Some files couldn't be copied or deleted: the run is "partly done".
+    /// Some files couldn't be copied or deleted, or clash: the run is "partly done".
     pub fn partial(&self) -> bool {
-        !self.failed.is_empty()
+        !self.failed.is_empty() || !self.clashes.is_empty()
     }
 }
 
@@ -292,8 +341,8 @@ struct Plan {
     dirs: Vec<(PathBuf, MakeDir)>,
     copies: Vec<Copy>,
     deletes: Vec<Delete>,
-    /// Type conflicts: left untouched, and reported.
-    conflicts: Vec<MirrorFailure>,
+    /// Clashes: left untouched, and reported.
+    clashes: Vec<MirrorClash>,
     unchanged: u64,
     delete_files: u64,
     /// The files in the target this part could delete from: the denominator of the guard.
@@ -319,7 +368,7 @@ pub fn mirror(
         all.dirs.extend(plan.dirs);
         all.copies.extend(plan.copies);
         all.deletes.extend(plan.deletes);
-        all.conflicts.extend(plan.conflicts);
+        all.clashes.extend(plan.clashes);
         dest_files += plan.dest_files;
     }
     // 100 allows any deletion; below it, the share of the target's files is checked.
@@ -345,7 +394,7 @@ pub fn mirror(
                     .count() as u64
             })
             .sum(),
-        failed: all.conflicts,
+        clashes: all.clashes,
         ..Default::default()
     };
     for part in &parts {
@@ -629,12 +678,12 @@ fn plan(part: &Part<'_>, compare: Compare) -> Plan {
     match fs::symlink_metadata(&part.dest) {
         Err(_) => plan.dirs.push((part.dest.clone(), MakeDir::New)),
         Ok(m) if !m.is_dir() => {
-            plan.conflicts.push(conflict(&part.dest));
+            plan.clashes.push(clash(&part.dest, ClashKind::File));
             return plan;
         }
         Ok(_) => {}
     }
-    // A file in one and a folder in the other is a type conflict: the target's
+    // A file in one and a folder in the other is a clash: the target's
     // item and everything under it are left as they are, and nothing beneath the source's item
     // is mirrored.
     let mut conflicted: Vec<&Path> = Vec::new();
@@ -643,13 +692,14 @@ fn plan(part: &Part<'_>, compare: Compare) -> Plan {
             continue;
         }
         let dest_kind = part.dest_tree.entries.get(rel).copied();
-        let swapped = matches!(
-            (kind, dest_kind),
-            (Kind::Dir, Some(Kind::File { .. })) | (Kind::File { .. }, Some(Kind::Dir))
-        );
-        if swapped {
+        let in_mirror = match (kind, dest_kind) {
+            (Kind::Dir, Some(Kind::File { .. })) => Some(ClashKind::File),
+            (Kind::File { .. }, Some(Kind::Dir)) => Some(ClashKind::Folder),
+            _ => None,
+        };
+        if let Some(in_mirror) = in_mirror {
             conflicted.push(rel);
-            plan.conflicts.push(conflict(&part.dest.join(rel)));
+            plan.clashes.push(clash(&part.dest.join(rel), in_mirror));
             continue;
         }
         match kind {
@@ -665,8 +715,8 @@ fn plan(part: &Part<'_>, compare: Compare) -> Plan {
     // Nothing is deleted under a source folder that couldn't be read.
     let unknown: BTreeSet<&PathBuf> = part.tree.unreadable.iter().map(|(p, _)| p).collect();
     // An extra is anything in the target that isn't in the source, whose folders above it are
-    // folders in the source too or extras themselves. Under a source file or link (a type
-    // conflict, or a link that's skipped), the target is left alone.
+    // folders in the source too or extras themselves. Under a source file or link (a clash, or
+    // a link that's skipped), the target is left alone.
     for (rel, &kind) in &part.dest_tree.entries {
         if part.tree.entries.contains_key(rel) || unknown.iter().any(|u| rel.starts_with(u)) {
             continue;
@@ -691,10 +741,10 @@ fn plan(part: &Part<'_>, compare: Compare) -> Plan {
     plan
 }
 
-fn conflict(path: &Path) -> MirrorFailure {
-    MirrorFailure {
+fn clash(path: &Path, in_mirror: ClashKind) -> MirrorClash {
+    MirrorClash {
         path: path.to_path_buf(),
-        message: tr("error-mirror-type-conflict"),
+        in_mirror,
     }
 }
 
@@ -727,7 +777,7 @@ fn plan_file(
         }
         Some(Kind::Link) => Replaces::Link,
         Some(Kind::Dir) => {
-            plan.conflicts.push(conflict(&to));
+            plan.clashes.push(clash(&to, ClashKind::Folder));
             return;
         }
     };

@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use replica_core::cancel::CancelToken;
 use replica_core::history::History;
 use replica_core::job::{AfterStep, BeforeStep, Job, Mode, Source, Target, VolumeRef};
+use replica_core::paths;
 use replica_core::platform::fake::{FakeResolver, MemorySecretStore, PlainTree};
 use replica_core::platform::{Credential, Secret, SecretStore};
 use replica_core::repo_lock::FileLocks;
@@ -307,7 +308,7 @@ fn the_history_round_trips_and_survives_reopening() {
 
     drop(f.history);
     let history = History::open(&f.temp.path().join("history.db")).unwrap();
-    assert_eq!(history.version().unwrap(), 3);
+    assert_eq!(history.version().unwrap(), 4);
     let runs = history.recent(Some("job"), 10).unwrap();
     assert_eq!(runs.len(), 1);
     let run = &runs[0];
@@ -562,6 +563,75 @@ fn a_file_in_use_makes_a_mirror_run_partly_done() {
         "the history keeps the count"
     );
     assert_eq!(run.skipped(), Some(1));
+}
+
+#[test]
+fn a_mirror_run_with_clashes_lists_them_all_with_what_to_do() {
+    let mut f = Fixture::new();
+    let job = mirror_job(&f, vec![drive("BACKUP", "mirror")]);
+    // Where the source has files, the mirror has folders of those names, and the other way
+    // round, at the top of the source's folder and deeper.
+    f.write("src/notes", "a file in the source");
+    f.write("drive/mirror/src/notes/old.txt", "a folder in the mirror");
+    f.write("src/deep/dir/inner.txt", "a folder in the source");
+    f.write("drive/mirror/src/deep/dir", "a file in the mirror");
+    let report = f.run(&job, None);
+
+    // The run is partly done, not a silent success, and the rest of it mirrored.
+    assert_eq!(report.outcome, Outcome::Partly, "{report:?}");
+    assert_eq!(
+        fs::read_to_string(f.path("drive/mirror/src/a.txt")).unwrap(),
+        "a"
+    );
+    // Nothing that clashes is deleted or changed.
+    assert_eq!(
+        fs::read_to_string(f.path("drive/mirror/src/notes/old.txt")).unwrap(),
+        "a folder in the mirror"
+    );
+    assert_eq!(
+        fs::read_to_string(f.path("drive/mirror/src/deep/dir")).unwrap(),
+        "a file in the mirror"
+    );
+
+    // The target says how many, and lists each with what to do.
+    let t = &report.targets[0];
+    assert_eq!(
+        t.reason.as_deref(),
+        Some(
+            "2 items are a file in one place and a folder in the other, so the mirror left them as they are."
+        )
+    );
+    let mirror = paths::real_path(&f.path("drive/mirror")).unwrap();
+    let shown = |parts: &[&str]| {
+        paths::without_verbatim_prefix(&parts.iter().fold(mirror.clone(), |p, c| p.join(c)))
+    };
+    let mut clashes: Vec<String> = t.clashes.iter().map(|c| c.advice()).collect();
+    clashes.sort();
+    assert_eq!(
+        clashes,
+        [
+            format!(
+                "{} is a file, but the source has a folder dir: delete or rename the file in the mirror, then run again.",
+                shown(&["src", "deep", "dir"])
+            ),
+            format!(
+                "{} is a folder, but the source has a file notes: delete or rename the folder in the mirror, then run again.",
+                shown(&["src", "notes"])
+            ),
+        ]
+    );
+
+    // History keeps them all, and the log has each one.
+    let run = &f.history.recent(Some("job"), 1).unwrap()[0];
+    let mut kept = run.targets[0].clashes.clone();
+    kept.sort();
+    assert_eq!(kept, clashes);
+    assert_eq!(run.targets[0].reason, t.reason);
+    assert_eq!(run.skipped(), Some(2));
+    let log = fs::read_to_string(report.log_path.as_ref().unwrap()).unwrap();
+    for c in &clashes {
+        assert!(log.contains(&format!("clash: {c}")), "{log}");
+    }
 }
 
 /// A WAL database with `rows` rows, whose last rows stay in the WAL while the returned

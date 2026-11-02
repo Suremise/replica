@@ -6,7 +6,10 @@ use std::time::SystemTime;
 
 use replica_core::cancel::CancelToken;
 use replica_core::job::Source;
-use replica_core::mirror::{Compare, MirrorError, MirrorOutcome, MirrorRequest, mirror};
+use replica_core::mirror::{
+    ClashKind, Compare, MirrorClash, MirrorError, MirrorOutcome, MirrorRequest, mirror,
+};
+use replica_core::paths;
 
 struct Fixture {
     temp: tempfile::TempDir,
@@ -140,47 +143,94 @@ fn first_copy_change_delete_and_exclusions() {
     );
 }
 
-#[test]
-fn type_conflicts_are_left_alone_and_reported() {
-    let f = Fixture::new();
-    f.write("src/x/inner.txt", "folder");
-    f.write("src/y", "file");
-    f.write("src/z.txt", "z1");
-    let sources = [source(f.path("src"), &[])];
-    f.run(&sources, 100).unwrap();
-    fs::remove_dir_all(f.path("src/x")).unwrap();
-    fs::remove_file(f.path("src/y")).unwrap();
-    f.write("src/x", "now a file");
-    f.write("src/y/inner.txt", "now a folder");
-    f.write("src/z.txt", "z2 changed");
-    let out = f.run(&sources, 100).unwrap();
-    // Both swaps are reported, and nothing is done to them.
-    assert!(out.partial());
-    let conflicts: Vec<String> = out
-        .failed
+/// The clashes, by their path under the target and what each is in the mirror.
+fn clashes(f: &Fixture, out: &MirrorOutcome) -> Vec<(String, ClashKind)> {
+    let target = paths::real_path(&f.path("target")).unwrap();
+    out.clashes
         .iter()
-        .map(|c| c.path.file_name().unwrap().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(conflicts, ["x", "y"], "{:?}", out.failed);
-    assert!(
-        out.failed
-            .iter()
-            .all(|c| c.message.contains("type conflict"))
-    );
-    assert_eq!(
-        f.read("target/src/x/inner.txt"),
-        "folder",
-        "the old folder is untouched"
-    );
-    assert_eq!(f.read("target/src/y"), "file", "the old file is untouched");
-    // The rest of the tree still mirrors.
-    assert_eq!(f.read("target/src/z.txt"), "z2 changed");
-    assert_eq!(out.copied, 1);
-    assert_eq!(out.deleted, 0);
+        .map(|c| {
+            let rel = c.path.strip_prefix(&target).unwrap_or_else(|_| {
+                panic!("{:?} under {:?}", c.path, target);
+            });
+            (rel.to_string_lossy().replace('\\', "/"), c.in_mirror)
+        })
+        .collect()
 }
 
 #[test]
-fn a_type_conflict_at_the_top_level_is_left_alone_and_the_rest_mirrors() {
+fn clashes_in_both_directions_and_at_any_depth_are_all_listed_and_left_alone() {
+    let f = Fixture::new();
+    f.write("src/x/inner.txt", "folder");
+    f.write("src/y", "file");
+    f.write("src/deep/er/a/inner.txt", "deep folder");
+    f.write("src/deep/er/b", "deep file");
+    f.write("src/z.txt", "z1");
+    let sources = [source(f.path("src"), &[])];
+    f.run(&sources, 100).unwrap();
+    // Each of them turns into the other kind of item in the source.
+    fs::remove_dir_all(f.path("src/x")).unwrap();
+    fs::remove_file(f.path("src/y")).unwrap();
+    fs::remove_dir_all(f.path("src/deep/er/a")).unwrap();
+    fs::remove_file(f.path("src/deep/er/b")).unwrap();
+    f.write("src/x", "now a file");
+    f.write("src/y/inner.txt", "now a folder");
+    f.write("src/deep/er/a", "now a file");
+    f.write("src/deep/er/b/inner.txt", "now a folder");
+    f.write("src/z.txt", "z2 changed");
+    f.write("src/deep/new.txt", "new");
+    let out = f.run(&sources, 100).unwrap();
+
+    // Every clash is listed, with what it is in the mirror, and none is a plain failure.
+    assert!(out.partial());
+    assert!(out.failed.is_empty(), "{:?}", out.failed);
+    let mut found = clashes(&f, &out);
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        found,
+        [
+            ("src/deep/er/a".to_string(), ClashKind::Folder),
+            ("src/deep/er/b".to_string(), ClashKind::File),
+            ("src/x".to_string(), ClashKind::Folder),
+            ("src/y".to_string(), ClashKind::File),
+        ]
+    );
+
+    // Nothing is deleted or changed in the mirror where they clash.
+    assert_eq!(f.read("target/src/x/inner.txt"), "folder");
+    assert_eq!(f.read("target/src/y"), "file");
+    assert_eq!(f.read("target/src/deep/er/a/inner.txt"), "deep folder");
+    assert_eq!(f.read("target/src/deep/er/b"), "deep file");
+    // The rest of the tree still mirrors.
+    assert_eq!(f.read("target/src/z.txt"), "z2 changed");
+    assert_eq!(f.read("target/src/deep/new.txt"), "new");
+    assert_eq!((out.copied, out.deleted), (2, 0));
+}
+
+// Windows paths: elsewhere a `\` isn't a separator, so the name would be the whole path.
+#[cfg(windows)]
+#[test]
+fn a_clash_says_where_it_is_what_it_is_in_each_place_and_what_to_do() {
+    // As the engine has it, with the long-path prefix, which people never see.
+    let folder = MirrorClash {
+        path: PathBuf::from(r"\\?\D:\Mirror\notes"),
+        in_mirror: ClashKind::Folder,
+    };
+    assert_eq!(
+        folder.advice(),
+        r"D:\Mirror\notes is a folder, but the source has a file notes: delete or rename the folder in the mirror, then run again."
+    );
+    let file = MirrorClash {
+        path: PathBuf::from(r"D:\Mirror\src\.git"),
+        in_mirror: ClashKind::File,
+    };
+    assert_eq!(
+        file.advice(),
+        r"D:\Mirror\src\.git is a file, but the source has a folder .git: delete or rename the file in the mirror, then run again."
+    );
+}
+
+#[test]
+fn a_clash_at_the_top_level_is_left_alone_and_the_rest_mirrors() {
     let f = Fixture::new();
     // A folder source whose place in the target is a file, at a 100% allowance.
     f.write("src/a.txt", "a");
@@ -191,7 +241,7 @@ fn a_type_conflict_at_the_top_level_is_left_alone_and_the_rest_mirrors() {
         "target/notes.md/old.txt",
         "an old folder where the file goes",
     );
-    // And a source with no conflict.
+    // And a source with no clash.
     f.write("other/b.txt", "b");
     let sources = [
         source(f.path("src"), &[]),
@@ -200,11 +250,13 @@ fn a_type_conflict_at_the_top_level_is_left_alone_and_the_rest_mirrors() {
     ];
     let out = f.run(&sources, 100).unwrap();
     assert!(out.partial());
-    assert_eq!(out.failed.len(), 2, "{:?}", out.failed);
-    assert!(
-        out.failed
-            .iter()
-            .all(|c| c.message.contains("type conflict"))
+    assert!(out.failed.is_empty(), "{:?}", out.failed);
+    assert_eq!(
+        clashes(&f, &out),
+        [
+            ("src".to_string(), ClashKind::File),
+            ("notes.md".to_string(), ClashKind::Folder),
+        ]
     );
     assert_eq!(f.read("target/src"), "an old file where the folder goes");
     assert_eq!(
