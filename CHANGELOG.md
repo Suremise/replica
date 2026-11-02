@@ -6,6 +6,17 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-02
+
+Mirror runs now list every file/folder clash with what to do, and the tray icon's tooltip always shows.
+
+**Not signed yet:** Windows SmartScreen may warn the first time you run the installer or the
+exes ("Windows protected your PC"). Check the download against the release's `SHA256SUMS.txt`
+first (`sha256sum -c SHA256SUMS.txt --ignore-missing`, or compare `Get-FileHash <file>` with
+it), and if it matches, choose **More info**, then **Run anyway**.
+
+Installing it over 0.1.0 keeps your settings, jobs, history and saved passwords.
+
 ### Changed
 
 - A mirror run that finds a file in one place and a folder of the same name in the other still
@@ -85,5 +96,6 @@ it), and if it matches, choose **More info**, then **Run anyway**.
 - Translation-ready: every message comes from Fluent strings. English only for now.
 - No telemetry and no network except the targets you set up.
 
-[Unreleased]: https://github.com/Suremise/replica/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Suremise/replica/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Suremise/replica/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Suremise/replica/releases/tag/v0.1.0
