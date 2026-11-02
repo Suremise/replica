@@ -1,12 +1,16 @@
 <#
 .SYNOPSIS
-    Writes THIRD-PARTY-NOTICES.txt: every crate in Replica's exes, SQLite, and restic.
+    Writes THIRD-PARTY-NOTICES.txt: every crate in Replica's exes, SQLite, Microsoft's C runtime,
+    and restic.
 .DESCRIPTION
     Part 1 is the crates of the Windows build (cargo-about, with about.toml and about.hbs),
     without dev or build dependencies, then the copyright notices of the crates whose MIT text
     there is the licence's template (see Get-CopyrightNotices). SQLite is compiled in by rusqlite's "bundled" feature and
-    isn't a crate, so it gets a note of its own. Part 2 is restic's, third_party/restic/NOTICES.txt,
-    made by scripts/audit-restic-licences.py when the restic pin moves.
+    isn't a crate, so it gets a note of its own. So does Microsoft's C runtime, linked in
+    statically (.cargo/config.toml): not a crate, so cargo-about doesn't see it, and under
+    Microsoft's terms: a recorded exception, like restic's MPL-2.0 module, to the rule that
+    everything Replica ships is MIT or equally permissive. Part 2 is restic's, third_party/restic/NOTICES.txt, made by
+    scripts/audit-restic-licences.py when the restic pin moves.
 
     The file is committed, so the README can link it and every build's About tab carries it.
     -Check writes it to a temp file and fails if the committed one differs (release.yml runs that).
@@ -130,8 +134,8 @@ try {
         "THIRD-PARTY NOTICES FOR REPLICA $version",
         '',
         'Replica is under the MIT licence (LICENSE, beside this file). It is built from the',
-        'third-party Rust crates in part 1 and compiles in SQLite, and it ships the unmodified restic',
-        'exe in part 2. Their licences and notices follow.',
+        'third-party Rust crates in part 1, compiles in SQLite and links in Microsoft''s C runtime,',
+        'and it ships the unmodified restic exe in part 2. Their licences and notices follow.',
         '',
         $rule
     ) -join "`n"
@@ -144,10 +148,24 @@ try {
         '',
         $rule
     ) -join "`n"
+    # Microsoft's C runtime, linked in statically (.cargo/config.toml, +crt-static).
+    $crt = @(
+        'MICROSOFT C RUNTIME',
+        '',
+        'Replica''s exes link in parts of Microsoft''s C runtime (the static libraries of the Visual',
+        'C++ build tools and the Windows SDK: libcmt, libvcruntime and libucrt), unmodified, so they',
+        'need no Visual C++ redistributable installed. They are Copyright (c) Microsoft Corporation,',
+        'and are distributed under Microsoft''s terms for "Distributable Code" in the Microsoft Visual',
+        'Studio licence, not under an open-source licence: an explicit exception to Replica''s rule',
+        'that everything it ships is MIT or equally permissive. See',
+        'https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files',
+        '',
+        $rule
+    ) -join "`n"
     $restic = Get-Content -Raw -Encoding utf8 (Join-Path $root 'third_party/restic/NOTICES.txt')
     $crateText = (Get-Content -Raw -Encoding utf8 $crates) -replace "`r`n", "`n"
     $copyrights = Get-CopyrightNotices $crateText $root
-    $text = ($header, $crateText.TrimEnd(), '', $copyrights, $sqlite, $restic.TrimEnd()) -join "`n"
+    $text = ($header, $crateText.TrimEnd(), '', $copyrights, $sqlite, $crt, $restic.TrimEnd()) -join "`n"
     $text = ($text -replace "`r`n", "`n") + "`n"
 
     if ($Check) {

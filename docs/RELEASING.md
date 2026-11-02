@@ -55,9 +55,12 @@ about both (see the checklist).
 
 **The C runtime is linked into the exes** (`.cargo/config.toml`, `+crt-static`), so they need no
 Visual C++ redistributable, which would need an admin install. The parts of Microsoft's C runtime
-linked in are "Distributable Code" under the Visual Studio licence, which allows shipping them in
-an app; they need no entry in THIRD-PARTY-NOTICES. `package.ps1` checks both exes import no C
-runtime DLL and nothing that isn't part of Windows.
+linked in, unmodified, are under Microsoft's terms ("Distributable Code" in the Visual Studio
+licence), not an MIT-style licence: **an explicit exception to the licence rule**, beside restic's
+MPL-2.0 module (shipped unmodified inside the restic exe). THIRD-PARTY-NOTICES names it in a
+section of its own, which `scripts/third-party-notices.ps1` writes, and the README's licence line
+has a footnote. `package.ps1` checks both exes import no C runtime DLL and nothing that isn't part
+of Windows.
 
 **WiX 5, not cargo-wix or WiX 6+:** `cargo-wix` drives WiX 3, which needs the .NET Framework 3.5
 (an admin install); WiX 6 and later come with the Open Source Maintenance Fee terms. WiX 5 is

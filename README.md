@@ -239,7 +239,7 @@ updates. It connects to nothing but the targets you set up: your drives and your
 
 ## Licence
 
-**MIT; every dependency is MIT or equally permissive; restic is bundled under BSD-2.**
+**MIT; every dependency is MIT or equally permissive\*; restic is bundled under BSD-2.**
 
 Replica's own code is under the [MIT licence](LICENSE). Every Rust crate it's built from is MIT,
 Apache-2.0, BSD, ISC, Zlib or similarly permissive, and the CI checks that with `cargo deny`.
@@ -247,6 +247,12 @@ The bundled restic exe is unmodified restic, under BSD-2-Clause; one Go module i
 MPL-2.0, which is fine to ship unmodified. Every licence, with links to the exact sources, is in
 [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES.txt), which ships with Replica. restic's part of it is
 [third_party/restic/LICENSES.md](third_party/restic/LICENSES.md).
+
+\* Two exceptions, decided on purpose: **restic's one MPL-2.0 module**, shipped unmodified inside
+the restic exe, and **Microsoft's C runtime**, linked into Replica's exes unmodified under
+Microsoft's redistribution terms ("Distributable Code"). Every Windows app built with
+Microsoft's compiler carries or needs the C runtime; linking it in means Replica installs and
+runs without an admin install of the Visual C++ redistributable.
 
 ## Building from source
 

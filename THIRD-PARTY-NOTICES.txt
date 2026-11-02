@@ -1,8 +1,8 @@
 THIRD-PARTY NOTICES FOR REPLICA 0.1.0
 
 Replica is under the MIT licence (LICENSE, beside this file). It is built from the
-third-party Rust crates in part 1 and compiles in SQLite, and it ships the unmodified restic
-exe in part 2. Their licences and notices follow.
+third-party Rust crates in part 1, compiles in SQLite and links in Microsoft's C runtime,
+and it ships the unmodified restic exe in part 2. Their licences and notices follow.
 
 ================================================================================
 PART 1: RUST CRATES
@@ -3324,6 +3324,17 @@ SQLITE
 
 SQLite is compiled into Replica (through the libsqlite3-sys crate's "bundled" feature).
 Its authors have dedicated it to the public domain: https://www.sqlite.org/copyright.html
+
+================================================================================
+MICROSOFT C RUNTIME
+
+Replica's exes link in parts of Microsoft's C runtime (the static libraries of the Visual
+C++ build tools and the Windows SDK: libcmt, libvcruntime and libucrt), unmodified, so they
+need no Visual C++ redistributable installed. They are Copyright (c) Microsoft Corporation,
+and are distributed under Microsoft's terms for "Distributable Code" in the Microsoft Visual
+Studio licence, not under an open-source licence: an explicit exception to Replica's rule
+that everything it ships is MIT or equally permissive. See
+https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
 
 ================================================================================
 PART 2: RESTIC
