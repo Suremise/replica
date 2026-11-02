@@ -6,6 +6,11 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- The tray icon's tooltip could stop showing on hover after the icon changed state or showed
+  a notification, until its text next changed. It now always shows.
+
 ## [0.1.0] - 2026-10-24
 
 The first release.

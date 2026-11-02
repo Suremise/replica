@@ -24,7 +24,8 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_ERROR, NIIF_INFO,
     NIIF_RESPECT_QUIET_TIME, NIIF_WARNING, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
-    NOTIFY_ICON_DATA_FLAGS, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NOTIFY_ICON_DATA_FLAGS, NOTIFY_ICON_MESSAGE, NOTIFYICON_VERSION_4, NOTIFYICONDATAW,
+    Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconFromResourceEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
@@ -182,6 +183,14 @@ pub enum MenuItem {
     Separator,
 }
 
+/// How the icon reaches `Shell_NotifyIconW`: the real call, or a test's recorder.
+type Shell = fn(NOTIFY_ICON_MESSAGE, &NOTIFYICONDATAW) -> bool;
+
+fn real_shell(message: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> bool {
+    // SAFETY: `data` is a fully initialised NOTIFYICONDATAW for our own window.
+    unsafe { Shell_NotifyIconW(message, data) }.as_bool()
+}
+
 /// A hidden window with an icon in the notification area. It lives on the thread that made it
 /// (so it isn't `Send`), and its events come out of [`pump`] on that thread.
 pub struct NotifyIcon {
@@ -189,12 +198,17 @@ pub struct NotifyIcon {
     id: u32,
     icon: Icon,
     tip: String,
+    shell: Shell,
     _not_send: PhantomData<*const ()>,
 }
 
 impl NotifyIcon {
     /// Adds an icon showing `icon`, with the tooltip `tip`.
     pub fn new(icon: Icon, tip: &str) -> io::Result<Self> {
+        Self::with_shell(icon, tip, real_shell)
+    }
+
+    fn with_shell(icon: Icon, tip: &str, shell: Shell) -> io::Result<Self> {
         let class = window_class()?;
         // SAFETY: a hidden tool window of our registered class; it's destroyed in Drop.
         let hwnd = unsafe {
@@ -219,18 +233,22 @@ impl NotifyIcon {
             id: 1,
             icon,
             tip: tip.to_owned(),
+            shell,
             _not_send: PhantomData,
         };
         this.add()?;
         Ok(this)
     }
 
+    /// The icon's data, with `flags` and always the tooltip: under `NOTIFYICON_VERSION_4`
+    /// Windows hides the standard tooltip unless `NIF_SHOWTIP` is set, and any `NIM_MODIFY`
+    /// without it (a new icon, a balloon) turns the tooltip off until the next one with it.
     fn data(&self, flags: NOTIFY_ICON_DATA_FLAGS) -> NOTIFYICONDATAW {
         let mut data = NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: self.hwnd,
             uID: self.id,
-            uFlags: flags,
+            uFlags: flags | NIF_TIP | NIF_SHOWTIP,
             uCallbackMessage: CALLBACK,
             hIcon: self.icon.0,
             ..Default::default()
@@ -239,13 +257,8 @@ impl NotifyIcon {
         data
     }
 
-    fn notify(
-        &self,
-        message: windows::Win32::UI::Shell::NOTIFY_ICON_MESSAGE,
-        data: &NOTIFYICONDATAW,
-    ) -> io::Result<()> {
-        // SAFETY: `data` is a fully initialised NOTIFYICONDATAW for our window.
-        if unsafe { Shell_NotifyIconW(message, data) }.as_bool() {
+    fn notify(&self, message: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> io::Result<()> {
+        if (self.shell)(message, data) {
             Ok(())
         } else {
             Err(io::Error::other("Shell_NotifyIcon failed"))
@@ -254,7 +267,7 @@ impl NotifyIcon {
 
     /// Adds the icon (again, after Explorer restarts: [`UiEvent::TaskbarCreated`]).
     pub fn add(&self) -> io::Result<()> {
-        let mut data = self.data(NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP);
+        let mut data = self.data(NIF_MESSAGE | NIF_ICON);
         self.notify(NIM_ADD, &data)?;
         data.Anonymous.uVersion = NOTIFYICON_VERSION_4;
         self.notify(NIM_SETVERSION, &data)
@@ -270,7 +283,7 @@ impl NotifyIcon {
             return Ok(());
         }
         self.tip = tip.to_owned();
-        self.notify(NIM_MODIFY, &self.data(NIF_TIP | NIF_SHOWTIP))
+        self.notify(NIM_MODIFY, &self.data(NOTIFY_ICON_DATA_FLAGS(0)))
     }
 
     /// Shows a balloon from the icon. Windows shows it as a notification, and keeps quiet
@@ -837,5 +850,83 @@ mod tests {
             !unsafe { IsWindowVisible(hwnd) }.as_bool(),
             "the show waits for the stuck thread"
         );
+    }
+
+    thread_local! {
+        /// What the recording shell was sent: (message, flags, tooltip).
+        static SENT: RefCell<Vec<(NOTIFY_ICON_MESSAGE, NOTIFY_ICON_DATA_FLAGS, String)>> =
+            const { RefCell::new(Vec::new()) };
+    }
+
+    fn record(message: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> bool {
+        let end = data
+            .szTip
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(data.szTip.len());
+        let tip = String::from_utf16_lossy(&data.szTip[..end]);
+        SENT.with(|s| s.borrow_mut().push((message, data.uFlags, tip)));
+        true
+    }
+
+    /// Takes what was sent since the last call.
+    fn sent() -> Vec<(NOTIFY_ICON_MESSAGE, NOTIFY_ICON_DATA_FLAGS, String)> {
+        SENT.with(|s| std::mem::take(&mut *s.borrow_mut()))
+    }
+
+    /// Asserts each message sent carries the tooltip, shown, with the text `tip`.
+    fn assert_tip_kept(sent: &[(NOTIFY_ICON_MESSAGE, NOTIFY_ICON_DATA_FLAGS, String)], tip: &str) {
+        assert!(!sent.is_empty());
+        for (message, flags, text) in sent {
+            assert!(
+                flags.contains(NIF_TIP | NIF_SHOWTIP),
+                "{message:?}: {flags:?}"
+            );
+            assert_eq!(text, tip, "{message:?}");
+        }
+    }
+
+    /// Under `NOTIFYICON_VERSION_4` a modify without `NIF_SHOWTIP` hides the tooltip: every
+    /// change (a new icon, a balloon, a new tooltip) and the re-add after Explorer restarts keep
+    /// it. A recording shell: no icon reaches the notification area, and the icon's hidden
+    /// window is never shown.
+    #[test]
+    fn every_change_keeps_the_tooltip_showing() {
+        // The recorder never reads the icon, so an empty handle stands in for one.
+        let mut icon = NotifyIcon::with_shell(Icon(HICON::default()), "Replica", record).unwrap();
+        let added = sent();
+        assert_eq!(added[0].0, NIM_ADD);
+        assert!(added[0].1.contains(NIF_ICON | NIF_MESSAGE));
+        assert_tip_kept(&added, "Replica");
+
+        for _ in 0..3 {
+            icon.set_icon(Icon(HICON::default())).unwrap();
+            let changed = sent();
+            assert!(changed.iter().all(|s| s.0 == NIM_MODIFY));
+            assert!(changed.iter().any(|s| s.1.contains(NIF_ICON)));
+            assert_tip_kept(&changed, "Replica");
+        }
+
+        icon.balloon("Backup failed", "Documents", BalloonKind::Error)
+            .unwrap();
+        let ballooned = sent();
+        assert!(ballooned.iter().all(|s| s.0 == NIM_MODIFY));
+        assert!(ballooned.iter().any(|s| s.1.contains(NIF_INFO)));
+        assert_tip_kept(&ballooned, "Replica");
+
+        icon.set_tip("Replica\nBacking up Documents").unwrap();
+        let retipped = sent();
+        assert!(retipped.iter().all(|s| s.0 == NIM_MODIFY));
+        assert_tip_kept(&retipped, "Replica\nBacking up Documents");
+
+        // Explorer restarted: the icon is added again as it last showed.
+        icon.add().unwrap();
+        let again = sent();
+        assert_eq!(again[0].0, NIM_ADD);
+        assert!(again[0].1.contains(NIF_ICON | NIF_MESSAGE));
+        assert_tip_kept(&again, "Replica\nBacking up Documents");
+
+        drop(icon);
+        assert_eq!(sent()[0].0, NIM_DELETE);
     }
 }
