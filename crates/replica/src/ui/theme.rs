@@ -202,7 +202,9 @@ pub const CONTROL_RADIUS: u8 = 3;
 pub const MAX_CONTENT_WIDTH: f32 = 1040.0;
 
 /// The type scale, in points.
-pub const TITLE_SIZE: f32 = 20.0;
+/// A page's title ([`TextStyle::Heading`]): the frame's header over each page and the job
+/// editor's "Edit …" both draw at this size, so opening the editor keeps the title's size.
+pub const TITLE_SIZE: f32 = 18.0;
 pub const SECTION_SIZE: f32 = 14.0;
 pub const BODY_SIZE: f32 = 13.0;
 pub const SMALL_SIZE: f32 = 12.0;

@@ -899,9 +899,9 @@ own constants (`shell.rs`, `menu.rs`, `status_bar.rs`), so the pages' look (`the
   apart, 13-point text and 16-point icons; the sidebar is 176 wide, 156 under a 1000-point
   window, and under 880 points a 44-point **rail** of the icons alone, each page's name in its
   hover text (and still its name for a screen reader). A hairline divides it from the page.
-- Over the page, a slim header: the title (18 semibold, read as a heading) with the line saying
-  what the page is for beside it in secondary text (`page-*-subtitle`), 14 above it and under
-  it. The page is at most 1040 points wide (`theme::MAX_CONTENT_WIDTH`), 20 from the sidebar
+- Over the page, a slim header: the title (`TextStyle::Heading`, 18 semibold, read as a
+  heading) with the line saying what the page is for beside it in secondary text
+  (`page-*-subtitle`), 14 above it and under it. The page is at most 1040 points wide (`theme::MAX_CONTENT_WIDTH`), 20 from the sidebar
   and the window's edge.
 - The sidebar's header is the app icon (16 points) and "Replica" at 13 semibold. `build.rs`
   decodes the icon's 20, 32, 40, 48 and 64 px PNGs from `assets/icon/replica.ico` to raw RGBA
@@ -937,7 +937,8 @@ as "a bit like a hobby project"):
 - **Every pair of text and background passes WCAG AA** (4.5:1; 3:1 for glyphs, outlines and the
   focus ring): `theme::tests` computes each ratio from the palettes, so a colour change that
   fails is caught.
-- Type: page title 20 semibold (`TITLE_SIZE`, `TextStyle::Heading`), section 14 semibold
+- Type: page title 18 semibold (`TITLE_SIZE`, `TextStyle::Heading`: the frame's header and the
+  editor's "Edit …" alike), section 14 semibold (also every dialog's title)
   (`theme::section_style()`), body 13, secondary 12, and monospace 12 (`MONO_SIZE`: Cascadia
   Mono, else Consolas) for paths, targets, repository locations, snapshot IDs and the numbers
   in lists. Segoe UI's figures are tabular already, so times line up in proportional text.

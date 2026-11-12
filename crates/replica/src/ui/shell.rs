@@ -35,7 +35,7 @@ use super::restore::RestoreTab;
 use super::settings::{Page, SettingsTab};
 use super::status_bar::{self, Facts};
 use super::theme::{self, CONTROL_RADIUS, MAX_CONTENT_WIDTH, space};
-use super::widgets::{dialog_frame, flow, option_info};
+use super::widgets::{dialog_frame, flow, heading, option_info};
 
 /// How long the window's size and place must stay put before they're saved.
 const SETTLE: Duration = Duration::from_secs(1);
@@ -113,9 +113,8 @@ const NAV_ICON_SIZE: f32 = 16.0;
 const APP_ICON_SIZE: f32 = 16.0;
 const NAV_TEXT_SIZE: f32 = 13.0;
 
-/// The page's header: its title's size, and the room round the page, slimmer than the
-/// pages' own spacing: the frame is dense, as a desktop tool's is.
-const PAGE_TITLE_SIZE: f32 = 18.0;
+/// The room round the page, slimmer than the pages' own spacing: the frame is dense, as a
+/// desktop tool's is. The title's size is the theme's ([`theme::TITLE_SIZE`]).
 const PAGE_TOP: f32 = 14.0;
 const PAGE_SIDE: f32 = 20.0;
 const UNDER_HEADER: f32 = 14.0;
@@ -390,7 +389,7 @@ impl Shell {
             ui.spacing_mut().item_spacing.x = space::M;
             let title = ui.label(
                 RichText::new(self.tab.title())
-                    .font(theme::semibold(PAGE_TITLE_SIZE))
+                    .text_style(egui::TextStyle::Heading)
                     .color(p.text),
             );
             ui.ctx()
@@ -561,7 +560,7 @@ impl Shell {
             .frame(dialog_frame(ctx))
             .show(ctx, |ui| {
                 ui.set_max_width(420.0);
-                ui.heading(tr("menu-failed-title"));
+                heading(ui, &tr("menu-failed-title"));
                 ui.add_space(6.0);
                 ui.label(flow(&tr!("menu-failed", error = error.as_str())));
                 ui.add_space(8.0);
@@ -610,7 +609,7 @@ impl Shell {
             .frame(dialog_frame(ctx))
             .show(ctx, |ui| {
                 ui.set_max_width(420.0);
-                ui.heading(tr("tray-notice-title"));
+                heading(ui, &tr("tray-notice-title"));
                 ui.add_space(6.0);
                 ui.label(flow(&tr("tray-notice-body")));
                 ui.add_space(8.0);
