@@ -38,9 +38,6 @@ pub enum Command {
     Stop,
     Show(Tab),
     ToggleStatusBar,
-    Settings,
-    /// Settings, on its Schedules tab with the scheduled tasks.
-    ScheduledTasks,
     /// Windows' own Task Scheduler.
     TaskScheduler,
     ProjectPage,
@@ -55,7 +52,8 @@ impl Command {
             Command::Show(Tab::Jobs) => Key::Num1,
             Command::Show(Tab::History) => Key::Num2,
             Command::Show(Tab::Restore) => Key::Num3,
-            Command::Settings => Key::Comma,
+            Command::Show(Tab::Schedules) => Key::Num4,
+            Command::Show(Tab::Settings) => Key::Comma,
             _ => return None,
         };
         Some(KeyboardShortcut::new(Modifiers::COMMAND, key))
@@ -70,6 +68,7 @@ impl Command {
             Key::Num1 => "1",
             Key::Num2 => "2",
             Key::Num3 => "3",
+            Key::Num4 => "4",
             key => key.name(),
         };
         Some(format!(
@@ -79,12 +78,13 @@ impl Command {
     }
 
     /// The commands with a shortcut.
-    const WITH_SHORTCUTS: [Command; 5] = [
+    const WITH_SHORTCUTS: [Command; 6] = [
         Command::NewJob,
         Command::Show(Tab::Jobs),
         Command::Show(Tab::History),
         Command::Show(Tab::Restore),
-        Command::Settings,
+        Command::Show(Tab::Schedules),
+        Command::Show(Tab::Settings),
     ];
 }
 
@@ -180,6 +180,8 @@ pub fn menu_bar(ui: &mut Ui, state: &MenuState) -> Option<Command> {
                         (Tab::Jobs, "menu-view-jobs"),
                         (Tab::History, "menu-view-history"),
                         (Tab::Restore, "menu-view-restore"),
+                        (Tab::Schedules, "menu-view-schedules"),
+                        (Tab::Settings, "menu-view-settings"),
                     ] {
                         let r = item(ui, state, Command::Show(tab), key, &mut chosen);
                         let shown = state.tab == tab;
@@ -199,14 +201,6 @@ pub fn menu_bar(ui: &mut Ui, state: &MenuState) -> Option<Command> {
                     }
                 });
                 menu(ui, "menu-tools", |ui| {
-                    item(ui, state, Command::Settings, "menu-settings", &mut chosen);
-                    item(
-                        ui,
-                        state,
-                        Command::ScheduledTasks,
-                        "menu-scheduled-tasks",
-                        &mut chosen,
-                    );
                     item(
                         ui,
                         state,
@@ -349,9 +343,10 @@ mod tests {
         let text = |c: Command| c.shortcut_text(&ctx).unwrap();
         assert_eq!(Command::NewJob.shortcut().unwrap().logical_key, Key::N);
         assert_eq!(text(Command::Show(Tab::History)), "Ctrl+2");
-        assert_eq!(text(Command::Settings), "Ctrl+,");
+        assert_eq!(text(Command::Show(Tab::Schedules)), "Ctrl+4");
+        assert_eq!(text(Command::Show(Tab::Settings)), "Ctrl+,");
         assert_eq!(text(Command::NewJob), "Ctrl+N");
-        assert!(Command::Show(Tab::Settings).shortcut().is_none());
+        assert!(Command::Show(Tab::About).shortcut().is_none());
         assert!(Command::Exit.shortcut().is_none());
         for c in Command::WITH_SHORTCUTS {
             assert!(c.shortcut().is_some(), "{c:?}");
@@ -377,7 +372,7 @@ mod tests {
         ] {
             assert!(!state.applies(c), "{c:?}");
         }
-        assert!(state.applies(Command::Settings));
+        assert!(state.applies(Command::Show(Tab::Settings)));
         assert!(state.applies(Command::Exit));
     }
 }

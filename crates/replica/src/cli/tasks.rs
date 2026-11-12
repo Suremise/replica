@@ -1,5 +1,5 @@
 //! `replica tasks`: Replica's Windows Task Scheduler tasks, in full view ("nothing hidden").
-//! The window's Scheduled tasks view shows the same.
+//! The window's Schedules page shows the same.
 //!
 //! ```text
 //! replica tasks list [--json]

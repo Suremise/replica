@@ -1,8 +1,8 @@
 # Replica's Windows Task Scheduler tasks: the optional way to run schedules (off by default).
-# Shown by `replica tasks`, the window's Scheduled tasks view, and in Task Scheduler itself.
+# Shown by `replica tasks`, the window's Schedules page, and in Task Scheduler itself.
 
 # A task's description in Task Scheduler. $schedule is its schedule as settings.toml writes it.
-tasks-description = Runs the Replica job "{ $job }" ({ $schedule }). Manage it in Replica's Settings, or with replica tasks.
+tasks-description = Runs the Replica job "{ $job }" ({ $schedule }). Manage it on Replica's Schedules page, or with replica tasks.
 
 ## replica tasks list
 

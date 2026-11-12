@@ -16,6 +16,8 @@ pub enum Icon {
     History,
     /// Restore: an arrow turning back.
     Restore,
+    /// Schedules: a calendar.
+    Schedules,
     /// Settings: a gear.
     Settings,
     /// About, and an info bar: an "i" in a circle.
@@ -95,6 +97,24 @@ impl Icon {
                 );
                 line(&[(0.62, 0.02), (0.48, 0.14), (0.62, 0.27)]);
                 line(&[(0.5, 0.33), (0.5, 0.54), (0.64, 0.64)]);
+            }
+            Icon::Schedules => {
+                // A calendar: its page, the band across its top, the two rings it hangs by,
+                // and its days.
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.1, 0.16), at(0.9, 0.9)),
+                    2.0,
+                    stroke,
+                    eframe::egui::StrokeKind::Middle,
+                );
+                line(&[(0.1, 0.38), (0.9, 0.38)]);
+                line(&[(0.32, 0.06), (0.32, 0.24)]);
+                line(&[(0.68, 0.06), (0.68, 0.24)]);
+                for y in [0.54, 0.74] {
+                    for x in [0.3, 0.5, 0.7] {
+                        dot(x, y, 0.055);
+                    }
+                }
             }
             Icon::Settings => {
                 let centre = at(0.5, 0.5);

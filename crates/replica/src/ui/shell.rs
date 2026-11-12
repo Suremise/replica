@@ -3,8 +3,9 @@
 //! going to the tray when it's closed or minimised (with a one-off notice saying so), and
 //! remembering where it was.
 //!
-//! Each page is a module of its own, shown by [`Shell::tab`]: Jobs, History and Restore, in the
-//! sidebar; Settings (with the Scheduled-tasks view) and About, from the Tools and Help menus.
+//! Each page is a module of its own, shown by [`Shell::tab`]: Jobs, History, Restore, Schedules
+//! and Settings in the sidebar (Settings at its foot) and the View menu; About from the Help
+//! menu.
 //!
 //! [`menu`]: super::menu
 //! [`status_bar`]: super::status_bar
@@ -32,7 +33,8 @@ use super::icons::Icon;
 use super::jobs::JobsTab;
 use super::menu::{self, Command, MenuState};
 use super::restore::RestoreTab;
-use super::settings::{Page, SettingsTab};
+use super::schedules::SchedulesTab;
+use super::settings::SettingsTab;
 use super::status_bar::{self, Facts};
 use super::theme::{self, CONTROL_RADIUS, MAX_CONTENT_WIDTH, space};
 use super::widgets::{dialog_frame, flow, heading, option_info};
@@ -49,21 +51,30 @@ pub enum Tab {
     Jobs,
     History,
     Restore,
+    Schedules,
     Settings,
     About,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 5] = [
+    pub const ALL: [Tab; 6] = [
         Tab::Jobs,
         Tab::History,
         Tab::Restore,
+        Tab::Schedules,
         Tab::Settings,
         Tab::About,
     ];
 
-    /// The pages in the sidebar. Settings and About are reached from the menus.
-    pub const SIDEBAR: [Tab; 3] = [Tab::Jobs, Tab::History, Tab::Restore];
+    /// The pages in the sidebar, and in the View menu: Settings last, at the sidebar's foot.
+    /// About is reached from the Help menu.
+    pub const SIDEBAR: [Tab; 5] = [
+        Tab::Jobs,
+        Tab::History,
+        Tab::Restore,
+        Tab::Schedules,
+        Tab::Settings,
+    ];
 
     /// Its name, in the sidebar and as its page's title.
     pub fn title(self) -> String {
@@ -71,6 +82,7 @@ impl Tab {
             Tab::Jobs => "tab-jobs",
             Tab::History => "tab-history",
             Tab::Restore => "tab-restore",
+            Tab::Schedules => "tab-schedules",
             Tab::Settings => "tab-settings",
             Tab::About => "tab-about",
         })
@@ -82,6 +94,7 @@ impl Tab {
             Tab::Jobs => "page-jobs-subtitle",
             Tab::History => "page-history-subtitle",
             Tab::Restore => "page-restore-subtitle",
+            Tab::Schedules => "page-schedules-subtitle",
             Tab::Settings => "page-settings-subtitle",
             Tab::About => "page-about-subtitle",
         })
@@ -92,6 +105,7 @@ impl Tab {
             Tab::Jobs => Icon::Jobs,
             Tab::History => Icon::History,
             Tab::Restore => Icon::Restore,
+            Tab::Schedules => Icon::Schedules,
             Tab::Settings => Icon::Settings,
             Tab::About => Icon::Info,
         }
@@ -136,6 +150,7 @@ pub struct Shell {
     pub jobs: JobsTab,
     pub history: HistoryTab,
     pub restore: RestoreTab,
+    pub schedules: SchedulesTab,
     pub settings: SettingsTab,
     pub about: AboutTab,
     state: WindowState,
@@ -172,6 +187,7 @@ impl Shell {
             jobs: JobsTab::new(Arc::clone(&backend)),
             history: HistoryTab::new(Arc::clone(&backend)),
             restore: RestoreTab::new(Arc::clone(&backend)),
+            schedules: SchedulesTab::new(Arc::clone(&backend)),
             settings: SettingsTab::new(Arc::clone(&backend)),
             about: AboutTab::new(Arc::clone(&backend)),
             state,
@@ -291,8 +307,9 @@ impl Shell {
     }
 
     /// The app's icon and name, then a row for each page in [`Tab::SIDEBAR`], the one shown
-    /// marked by the accent's bar. As a `rail`, only the icons, with each page's name in its
-    /// hover text. A screen reader reads it as a tab list, with the pages' names either way.
+    /// marked by the accent's bar: Settings apart from the others, at the sidebar's foot, as a
+    /// Windows app's navigation has it. As a `rail`, only the icons, with each page's name in
+    /// its hover text. A screen reader reads it as a tab list, with the pages' names either way.
     fn sidebar(&mut self, ui: &mut Ui, rail: bool) {
         let p = theme::of(ui);
         let (header, _) =
@@ -333,6 +350,10 @@ impl Shell {
         ui.scope_builder(UiBuilder::new().accessibility_parent(id), |ui| {
             ui.spacing_mut().item_spacing.y = NAV_ITEM_GAP;
             for tab in Tab::SIDEBAR {
+                if tab == Tab::Settings {
+                    // To the foot: the room left, less its own row (none in a short window).
+                    ui.add_space((ui.available_height() - NAV_ITEM_HEIGHT).max(0.0));
+                }
                 let selected = self.tab == tab;
                 let title = tab.title();
                 let (rect, response) = ui.allocate_exact_size(
@@ -506,11 +527,6 @@ impl Shell {
             Command::Stop => self.backend.send(UiRequest::Stop),
             Command::Show(tab) => self.tab = tab,
             Command::ToggleStatusBar => self.toggle_status_bar(),
-            Command::Settings => self.tab = Tab::Settings,
-            Command::ScheduledTasks => {
-                self.tab = Tab::Settings;
-                self.settings.page = Page::Schedules;
-            }
             Command::TaskScheduler => {
                 self.failed = self.backend.open_task_scheduler().err();
             }
@@ -576,7 +592,13 @@ impl Shell {
             Tab::Jobs => self.jobs.ui(ui),
             Tab::History => self.history.ui(ui),
             Tab::Restore => self.restore.ui(ui),
-            Tab::Settings => self.settings.ui(ui),
+            Tab::Schedules => self.schedules.ui(ui),
+            Tab::Settings => {
+                self.settings.ui(ui);
+                if std::mem::take(&mut self.settings.to_schedules) {
+                    self.tab = Tab::Schedules;
+                }
+            }
             Tab::About => self.about.ui(ui),
         }
     }

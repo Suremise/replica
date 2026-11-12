@@ -12,10 +12,11 @@ use replica::ui::widgets::{
     setting_row, small_toggle, status_chip, tab_strip, table, toggle, toolbar, toolbar_separator,
 };
 
-const ICONS: [Icon; 16] = [
+const ICONS: [Icon; 17] = [
     Icon::Jobs,
     Icon::History,
     Icon::Restore,
+    Icon::Schedules,
     Icon::Settings,
     Icon::Info,
     Icon::Folder,

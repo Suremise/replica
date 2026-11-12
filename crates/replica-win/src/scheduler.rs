@@ -26,7 +26,7 @@ use crate::win32::tasks::{TaskFolder, TaskInfo};
 /// Replica's Task Scheduler folder.
 pub const FOLDER: &str = r"\Replica";
 
-/// One of Replica's tasks, as the window's Scheduled tasks view and `replica tasks list` show it.
+/// One of Replica's tasks, as the window's Schedules page and `replica tasks list` show it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScheduledTask {
     /// The task's name: the job's name.

@@ -1,9 +1,7 @@
-//! The Settings tab, in tabs of its own so none is a long page to scroll:
-//! - Schedules: what runs them (the built-in timer, or Task Scheduler, off by default),
-//!   pausing them, and the Scheduled-tasks view (nothing hidden, by design, so it's
-//!   there whatever runs them): every task in Replica's Task Scheduler folder, orphans flagged,
-//!   each turned on or off or deleted, all removed, and Windows' own Task Scheduler a click
-//!   away;
+//! The Settings page, in tabs of its own so none is a long page to scroll:
+//! - Scheduling: what runs the schedules (the built-in timer, or Task Scheduler, off by
+//!   default) and pausing them, with a link to the Schedules page ([`super::schedules`]),
+//!   which lists Replica's tasks in Task Scheduler;
 //! - General: Start with Windows, how long run logs are kept, and resetting the settings;
 //! - restic: which restic runs;
 //! - Storage: where Replica keeps its files.
@@ -17,24 +15,19 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Id, Modal, RichText, Ui, vec2};
 use replica_core::i18n::tr;
-use replica_core::run::Outcome;
 use replica_core::settings::{AppSettings, ScheduleMode, Settings};
 use replica_core::tr;
-use replica_win::scheduler::ScheduledTask;
 
 use super::backend::{Backend, Places, change_settings};
-use super::icons::Icon;
-use super::jobs::outcome_text;
 use super::restore::{Load, spawn};
 use super::theme::{self, CONTROL_HEIGHT, space};
 use super::widgets::{
-    InfoKind, TableColumn, TableState, Tone, danger_button, danger_button_filled, dialog_frame,
-    empty_state, flow, heading, icon_button, info_bar, info_row, path_label, path_row, plain_card,
-    primary_button, relative_time, secondary_button, section_card, section_card_with_actions,
-    segmented, setting_row, small_toggle, status_chip, tab_strip, table, table_frame, toggle,
+    InfoKind, Tone, danger_button, danger_button_filled, dialog_frame, flow, heading, info_bar,
+    info_row, path_row, plain_card, primary_button, secondary_button, section_card,
+    section_card_with_actions, segmented, setting_row, status_chip, tab_strip, toggle,
 };
 
-/// How often it reads the settings and the tasks again while shown.
+/// How often it reads the settings again while shown.
 const RELOAD: Duration = Duration::from_secs(3);
 
 /// A restic's path and version.
@@ -45,8 +38,6 @@ type ResticInUse = (PathBuf, String);
 pub enum Confirm {
     /// Turning Task Scheduler off: delete the tasks, or keep them turned off?
     TurnOff,
-    DeleteTask(String),
-    DeleteAll,
     Reset,
 }
 
@@ -54,18 +45,18 @@ pub enum Confirm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Page {
     #[default]
-    Schedules,
+    Scheduling,
     General,
     Restic,
     Storage,
 }
 
 impl Page {
-    pub const ALL: [Page; 4] = [Page::Schedules, Page::General, Page::Restic, Page::Storage];
+    pub const ALL: [Page; 4] = [Page::Scheduling, Page::General, Page::Restic, Page::Storage];
 
     pub fn title(self) -> String {
         tr(match self {
-            Page::Schedules => "settings-tab-schedules",
+            Page::Scheduling => "settings-tab-scheduling",
             Page::General => "settings-tab-general",
             Page::Restic => "settings-tab-restic",
             Page::Storage => "settings-tab-storage",
@@ -79,7 +70,6 @@ pub struct SettingsTab {
     backend: Arc<dyn Backend>,
     pub settings: Result<Settings, String>,
     places: Places,
-    pub tasks: Result<Vec<ScheduledTask>, String>,
     loaded_at: Option<Instant>,
     /// The restic path being typed (empty: the bundled one).
     restic_text: String,
@@ -89,7 +79,8 @@ pub struct SettingsTab {
     message: Option<(bool, String)>,
     /// The run-log days while their control is being dragged (saved on release).
     log_days: Option<u32>,
-    task_table: TableState,
+    /// The link to the Schedules page was followed: the frame shows it.
+    pub to_schedules: bool,
 }
 
 impl SettingsTab {
@@ -100,14 +91,13 @@ impl SettingsTab {
             backend,
             settings: Ok(Settings::default()),
             places,
-            tasks: Ok(Vec::new()),
             loaded_at: None,
             restic_text: String::new(),
             restic: None,
             confirm: None,
             message: None,
             log_days: None,
-            task_table: TableState::default(),
+            to_schedules: false,
         }
     }
 
@@ -116,13 +106,6 @@ impl SettingsTab {
         self.settings = Settings::load_or_default(&self.backend.settings_file())
             .map(|l| l.settings)
             .map_err(|e| e.to_string());
-        let jobs: Vec<String> = self
-            .settings
-            .as_ref()
-            .map(|s| s.jobs.iter().map(|j| j.name.clone()).collect())
-            .unwrap_or_default();
-        let names: Vec<&str> = jobs.iter().map(String::as_str).collect();
-        self.tasks = self.backend.tasks(&names);
         if let Ok(s) = &self.settings
             && self.restic.is_none()
         {
@@ -202,15 +185,18 @@ impl SettingsTab {
             );
             ui.add_space(space::M);
         }
-        // Each tab fits the window at its default size; a narrow or short one scrolls (and so
-        // does Schedules with many tasks), each tab keeping its own place.
+        // Each tab fits the window at its default size; a narrow or short one scrolls, each tab
+        // keeping its own place.
         egui::ScrollArea::vertical()
             .id_salt(("settings-page", self.page as u8))
             .auto_shrink([false, false])
             .show(ui, |ui| match self.page {
-                Page::Schedules => {
+                Page::Scheduling => {
                     ui.add_enabled_ui(editable, |ui| self.schedules(ui));
-                    self.tasks_section(ui, editable);
+                    // Replica's tasks are a page of their own, a click away.
+                    if ui.link(tr("settings-see-schedules")).clicked() {
+                        self.to_schedules = true;
+                    }
                 }
                 Page::General => {
                     ui.add_enabled_ui(editable, |ui| self.general(ui));
@@ -245,7 +231,7 @@ impl SettingsTab {
 
     fn schedules(&mut self, ui: &mut Ui) {
         let app = self.app();
-        // Untitled: "Schedules" would only repeat its tab.
+        // Untitled: "Scheduling" would only repeat its tab.
         plain_card(ui, None, |ui| {
             let timer = app.schedule_mode == ScheduleMode::Timer;
             let modes = [tr("settings-mode-timer"), tr("settings-mode-tasks")];
@@ -466,121 +452,11 @@ impl SettingsTab {
         }
     }
 
-    fn tasks_section(&mut self, ui: &mut Ui, editable: bool) {
-        let tasks = match &self.tasks {
-            Ok(tasks) => Ok(tasks.clone()),
-            Err(e) => Err(e.clone()),
-        };
-        let none = tasks.as_ref().is_ok_and(Vec::is_empty);
-        let mut remove_all = false;
-        let mut open_scheduler = false;
-        section_card_with_actions(
-            ui,
-            &tr("tasks-title"),
-            Some(&flow(&tr("tasks-help"))),
-            |ui| {
-                open_scheduler = secondary_button(ui, &tr("tasks-open-scheduler")).clicked();
-                remove_all = ui
-                    .add_enabled_ui(editable && !none, |ui| {
-                        danger_button(ui, None, &tr("tasks-remove-all"))
-                    })
-                    .inner
-                    .clicked();
-            },
-            |ui| {
-                ui.add_space(space::S);
-                let tasks = match tasks {
-                    Ok(tasks) => tasks,
-                    Err(e) => {
-                        info_bar(ui, InfoKind::Error, None, &e);
-                        Vec::new()
-                    }
-                };
-                self.tasks_table(ui, &tasks, editable);
-                if tasks.iter().any(|t| t.orphan) {
-                    ui.add_space(space::S);
-                    info_bar(ui, InfoKind::Warning, None, &tr("tasks-orphan-help"));
-                }
-            },
-        );
-        if remove_all {
-            self.confirm = Some(Confirm::DeleteAll);
-        }
-        if open_scheduler && let Err(e) = self.backend.open_task_scheduler() {
-            self.message = Some((true, e));
-        }
-    }
-
-    fn tasks_table(&mut self, ui: &mut Ui, tasks: &[ScheduledTask], editable: bool) {
-        if tasks.is_empty() {
-            empty_state(
-                ui,
-                Icon::Empty,
-                &tr("tasks-none-title"),
-                &tr("tasks-none"),
-                None,
-            );
-            return;
-        }
-        let columns = [
-            // The task's name takes what the others leave; a name that's cut shows whole on
-            // hover.
-            TableColumn::new(tr("tasks-col-task"), None).at_least(120.0),
-            TableColumn::new(tr("tasks-col-job"), Some(130.0)),
-            TableColumn::new(tr("tasks-col-trigger"), Some(140.0)),
-            TableColumn::new(tr("tasks-col-next"), Some(84.0)),
-            TableColumn::new(tr("tasks-col-last"), Some(172.0)),
-            TableColumn::new(tr("tasks-col-on"), Some(44.0)),
-            TableColumn::new(tr("tasks-col-actions"), Some(64.0)),
-        ];
-        // The columns' room, scrolled sideways in a narrow window, with a solid scroll bar so
-        // it's plain there's more (nothing hidden).
-        let width = ui.available_width();
-        let mut action = None;
-        ui.scope(|ui| {
-            ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-            egui::ScrollArea::horizontal()
-                .id_salt("tasks-scroll")
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-                .show(ui, |ui| {
-                    // At least the columns' width: wider than the window, it scrolls.
-                    ui.set_width(width.max(760.0));
-                    table_frame(theme::of(ui)).show(ui, |ui| {
-                        table(
-                            ui,
-                            &tr("tasks-title"),
-                            &columns,
-                            tasks.len(),
-                            None,
-                            &mut self.task_table,
-                            |i| tr!("tasks-row", task = tasks[i].name.as_str()),
-                            |_| {},
-                            |ui, row, col| {
-                                if let Some(a) = task_cell(ui, &tasks[row], col, editable) {
-                                    action = Some(a);
-                                }
-                            },
-                        );
-                    });
-                });
-        });
-        match action {
-            Some(TaskAction::Enable(name, on)) => {
-                let result = self.backend.set_task_enabled(&name, on);
-                self.message = result.err().map(|e| (true, e));
-                self.load();
-            }
-            Some(TaskAction::Delete(name)) => self.confirm = Some(Confirm::DeleteTask(name)),
-            None => {}
-        }
-    }
-
     fn confirm_window(&mut self, ctx: &egui::Context) {
         let Some(confirm) = self.confirm.clone() else {
             return;
         };
-        // Each choice: its text, the answer, and whether it's the step that deletes.
-        let (title, body, choices): (String, String, Vec<(&str, u8, bool)>) = match &confirm {
+        let (title, body, choices) = match &confirm {
             Confirm::TurnOff => (
                 tr("tasks-turn-off-title"),
                 tr("tasks-turn-off-body"),
@@ -590,46 +466,13 @@ impl SettingsTab {
                     ("button-cancel", 0, false),
                 ],
             ),
-            Confirm::DeleteTask(name) => (
-                tr!("tasks-delete-title", task = name.as_str()),
-                tr("tasks-delete-body"),
-                vec![("jobs-delete", 1, true), ("button-cancel", 0, false)],
-            ),
-            Confirm::DeleteAll => (
-                tr("tasks-remove-all-title"),
-                tr("tasks-remove-all-body"),
-                vec![("tasks-remove-all", 1, true), ("button-cancel", 0, false)],
-            ),
             Confirm::Reset => (
                 tr("settings-reset-confirm-title"),
                 tr("settings-reset-body"),
                 vec![("settings-reset", 1, true), ("button-cancel", 0, false)],
             ),
         };
-        let mut answer = None;
-        Modal::new(Id::unique("settings-confirm"))
-            .frame(dialog_frame(ctx))
-            .show(ctx, |ui| {
-                ui.set_max_width(460.0);
-                heading(ui, &title);
-                ui.add_space(space::S);
-                ui.label(flow(&body));
-                ui.add_space(space::L);
-                ui.horizontal(|ui| {
-                    for (key, value, deletes) in choices {
-                        let clicked = if deletes {
-                            danger_button_filled(ui, &tr(key))
-                        } else {
-                            secondary_button(ui, &tr(key))
-                        }
-                        .clicked();
-                        if clicked {
-                            answer = Some(value);
-                        }
-                    }
-                });
-            });
-        let Some(answer) = answer else {
+        let Some(answer) = ask(ctx, "settings-confirm", &title, &body, choices) else {
             return;
         };
         self.confirm = None;
@@ -638,19 +481,6 @@ impl SettingsTab {
         }
         match confirm {
             Confirm::TurnOff => self.turn_off(answer == 1),
-            Confirm::DeleteTask(name) => {
-                let result = self.backend.delete_task(&name);
-                self.message = result.err().map(|e| (true, e));
-                self.load();
-            }
-            Confirm::DeleteAll => {
-                let result = self.backend.delete_all_tasks();
-                self.message = Some(match result {
-                    Ok(n) => (false, tr!("tasks-removed", count = n)),
-                    Err(e) => (true, e),
-                });
-                self.load();
-            }
             Confirm::Reset => {
                 if self.app().schedule_mode == ScheduleMode::TaskScheduler
                     && let Err(e) = self.backend.turn_off_tasks(true)
@@ -678,107 +508,38 @@ impl SettingsTab {
     }
 }
 
-/// What a task row's controls asked for.
-enum TaskAction {
-    /// Turn the task on (`true`) or off.
-    Enable(String, bool),
-    Delete(String),
-}
-
-/// A task's cell in column `col`: its name, its job (or the orphan's chip), schedule, next and
-/// last run, its on/off switch and Delete.
-fn task_cell(ui: &mut Ui, task: &ScheduledTask, col: usize, editable: bool) -> Option<TaskAction> {
-    // Text that doesn't fit its column is cut with "…", and shown whole on hover.
-    let text = |ui: &mut Ui, text: &str| ui.add(egui::Label::new(text).truncate());
-    match col {
-        0 => {
-            path_label(ui, &task.name);
-        }
-        1 if task.orphan => {
-            status_chip(ui, Tone::Warning, &tr("tasks-orphan"))
-                .on_hover_text(tr("tasks-orphan-help"));
-        }
-        1 => {
-            text(ui, &task.job);
-        }
-        2 => {
-            text(ui, task.schedule.as_deref().unwrap_or("—"));
-        }
-        3 => {
-            when(ui, task.next_run);
-        }
-        4 => {
-            let (tone, result) = last_result(task);
-            status_chip(ui, tone, &result);
-            when(ui, task.last_run);
-        }
-        5 => {
-            let mut on = task.enabled;
-            let for_key = if task.enabled {
-                "tasks-disable-for"
-            } else {
-                "tasks-enable-for"
-            };
-            let changed = ui
-                .add_enabled_ui(editable, |ui| small_toggle(ui, &mut on))
-                .inner
-                .accessible_name(tr!(for_key, task = task.name.as_str()))
-                .changed();
-            if changed {
-                return Some(TaskAction::Enable(task.name.clone(), on));
-            }
-        }
-        _ => {
-            let clicked = ui
-                .add_enabled_ui(editable, |ui| {
-                    icon_button(
-                        ui,
-                        Icon::Delete,
-                        &tr!("tasks-delete-for", task = task.name.as_str()),
-                    )
-                })
-                .inner
-                .clicked();
-            if clicked {
-                return Some(TaskAction::Delete(task.name.clone()));
-            }
-        }
-    }
-    None
-}
-
-/// How a task's last run ended, as a chip: Replica's exit code, or Task Scheduler's own.
-fn last_result(task: &ScheduledTask) -> (Tone, String) {
-    if task.last_run.is_none() {
-        return (Tone::Neutral, tr("result-never-run"));
-    }
-    match task.last_result {
-        Some(0) => (Tone::Ok, outcome_text(Outcome::Ok)),
-        Some(1) => (Tone::Failed, outcome_text(Outcome::Failed)),
-        Some(2) => (Tone::Warning, outcome_text(Outcome::Partly)),
-        Some(3) => (Tone::Warning, outcome_text(Outcome::Skipped)),
-        Some(code) => (
-            Tone::Neutral,
-            tr!("tasks-result-code", code = format!("0x{code:08X}")),
-        ),
-        None => (Tone::Neutral, tr("result-never-run")),
-    }
-}
-
-/// A task's time from now ("in 9 h", "2 h ago"), the exact time on hover; a dash if none.
-fn when(ui: &mut Ui, at: Option<chrono::NaiveDateTime>) {
-    match at {
-        Some(at) => {
-            let now = chrono::Local::now().naive_local();
-            ui.add(egui::Label::new(relative_time(at, now)).truncate())
-                .on_hover_text(time_text(Some(at)));
-        }
-        None => {
-            ui.label("—");
-        }
-    }
-}
-
-fn time_text(at: Option<chrono::NaiveDateTime>) -> String {
-    at.map_or_else(|| "—".into(), |t| t.format("%Y-%m-%d %H:%M").to_string())
+/// A question in a dialog: its `title`, its `body`, and a button for each choice (its text's
+/// key, the answer it gives, and whether it's the step that deletes, shown as a danger). The
+/// answer chosen, once one is.
+pub(super) fn ask(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    body: &str,
+    choices: Vec<(&str, u8, bool)>,
+) -> Option<u8> {
+    let mut answer = None;
+    Modal::new(Id::unique(id))
+        .frame(dialog_frame(ctx))
+        .show(ctx, |ui| {
+            ui.set_max_width(460.0);
+            heading(ui, title);
+            ui.add_space(space::S);
+            ui.label(flow(body));
+            ui.add_space(space::L);
+            ui.horizontal(|ui| {
+                for (key, value, deletes) in choices {
+                    let clicked = if deletes {
+                        danger_button_filled(ui, &tr(key))
+                    } else {
+                        secondary_button(ui, &tr(key))
+                    }
+                    .clicked();
+                    if clicked {
+                        answer = Some(value);
+                    }
+                }
+            });
+        });
+    answer
 }

@@ -782,7 +782,7 @@ Its modes (parsed by `tray::Mode::parse`):
   - `turn_off(delete)` is what turning the option off does: delete them all (the window's
     default) or turn them off.
 - The CLI has the same: `replica tasks list [--json]|enable|disable|remove <task>|remove --all`
-  (`crates/replica/src/cli/tasks.rs`). The window has the same in Settings' Scheduled-tasks view.
+  (`crates/replica/src/cli/tasks.rs`). The window has the same on its Schedules page.
 
 **Start with Windows (`replica-win::autostart`):**
 - An HKCU Run value `Replica`: the quoted path of the running `replica-tray.exe`, then
@@ -854,8 +854,8 @@ own constants (`shell.rs`, `menu.rs`, `status_bar.rs`), so the pages' look (`the
 `widgets.rs`) and the frame change apart:
 - **A menu bar** (`ui/menu.rs`, egui's `MenuBar`) across the top: File (New job…, Import jobs…,
   Export jobs…, Open settings folder, Open log folder, Close window, Exit Replica), Jobs (Run
-  all, Stop running jobs), View (the three pages, Status bar), Tools (Settings…, Scheduled
-  tasks…, Windows Task Scheduler) and Help (Replica on GitHub, About Replica). Each item is a
+  all, Stop running jobs), View (the sidebar's five pages, Status bar), Tools (Windows Task
+  Scheduler, alone: the pages it once held are in the sidebar and View) and Help (Replica on GitHub, About Replica). Each item is a
   command the window or the tray already had: `menu::menu_bar` returns the `menu::Command`
   chosen and `Shell::apply` does it, through the same calls as the page's own button (a new job is
   `JobsTab::edit(None)`, Export… is `JobsTab::open_export`) or the tray's menu (Exit is
@@ -866,7 +866,8 @@ own constants (`shell.rs`, `menu.rs`, `status_bar.rs`), so the pages' look (`the
   Choosing one closes the menu, whether by a click, Enter or a screen reader's Click (egui closes
   it only for a pointer's click).
 - **Shortcuts** (`menu::shortcuts`, once a frame, not while a modal dialog is up): Ctrl+N (New
-  job), Ctrl+1/2/3 (Jobs, History, Restore), Ctrl+, (Settings). egui 0.37's menu bar has **no
+  job), Ctrl+1/2/3/4 (Jobs, History, Restore, Schedules), Ctrl+, (Settings), all of them
+  `Command::Show(tab)`. egui 0.37's menu bar has **no
   Alt or F10 to the bar and no arrow keys between menus**; the menus open with a click, or Tab
   and Enter, and the shortcuts are the keyboard's way to the commands. For a screen reader the
   bar is a `MenuBar`, each menu a `MenuItem` with a popup, each item a `MenuItem` (a
@@ -891,10 +892,11 @@ own constants (`shell.rs`, `menu.rs`, `status_bar.rs`), so the pages' look (`the
   when the file's time changes, checked once a second), whichever page shows: the status bar,
   the menus' state and Run all use these, not the Jobs page's copy, which it refreshes only while
   it shows.
-- **A compact sidebar** of the main pages: Jobs, History and Restore, each a module shown by
-  `Shell::tab`, with an icon from `ui/icons.rs`. Settings (with the Scheduled-tasks view) and
-  About are pages too, reached from the Tools and Help menus, so no sidebar item is marked while
-  they show. The page shown has the accent's bar and a subtle fill. A screen reader reads the
+- **A compact sidebar** of the pages (`Tab::SIDEBAR`): Jobs, History, Restore and Schedules,
+  then Settings apart at the sidebar's foot, as a Windows app's navigation has it, each a module
+  shown by `Shell::tab`, with an icon from `ui/icons.rs`. View lists the same five. About is a
+  page too, reached from the Help menu, so no sidebar item is marked while it shows. The page
+  shown has the accent's bar and a subtle fill. A screen reader reads the
   sidebar as a tab list ("Pages"), each page a tab with its selected state. Items are 32 high, 2
   apart, 13-point text and 16-point icons; the sidebar is 176 wide, 156 under a 1000-point
   window, and under 880 points a 44-point **rail** of the icons alone, each page's name in its
@@ -1151,13 +1153,14 @@ never skips one (`history::paged`).
   button. There's no search within a snapshot: it would mean restic's `find` over the whole
   snapshot, which isn't cheap, and the tree reads one folder at a time.
 
-**The Settings tab (`ui/settings.rs`):** in four tabs of its own
+**The Settings page (`ui/settings.rs`):** in four tabs of its own
 ("in tabs rather than … a pane with a large scrollbar"), a `tab_strip` under the page's header
-(`settings::Page`, kept while the app runs). A tab's first card has no title where it would only repeat the tab's (Schedules, General, restic): **Schedules** (what runs them, Pause, the note, and
-the Scheduled-tasks card, there whatever runs them: nothing hidden), **General** (Start with
-Windows, the log days, Reset at the bottom), **restic** and **Storage** (where the files are).
-At the default window size none scrolls, except Schedules with many tasks; each tab keeps its
-own scroll place.
+(`settings::Page`, kept while the app runs). A tab's first card has no title where it would only
+repeat the tab's (Scheduling, General, restic): **Scheduling** (what runs the schedules, Pause,
+the note, and a link to the Schedules page, which has the tasks; not "Schedules", which the
+sidebar's page is called), **General** (Start with Windows, the log days, Reset at the bottom),
+**restic** and **Storage** (where the files are). At the default window size none scrolls; each
+tab keeps its own scroll place.
 - What runs the schedules: the built-in timer (the default) or Task Scheduler. Turning Task
   Scheduler on saves the option, and the tray makes the tasks (`reconcile_tasks` on `Reload`).
   **Turning it off asks first** whether to delete Replica's tasks (the default) or keep them
@@ -1173,9 +1176,10 @@ own scroll place.
   their backups; if Task Scheduler was on, its tasks are deleted first.
 - Every change goes through `backend::change_settings`, as the Jobs tab's do: re-read the file,
   edit, validate, save, `Reload`.
-- **Its layout:** a card each for Schedules ("What runs the schedules" as one row with a
+- **Its layout:** a card each for Scheduling ("What runs the schedules" as one row with a
   segmented control, Built-in timer | Task Scheduler, its line saying what the chosen one does;
-  Pause as a toggle row; the logged-on note as an info bar), Scheduled tasks, General (Start with Windows
+  Pause as a toggle row; the logged-on note as an info bar; the link to Schedules under it),
+  General (Start with Windows
   as a toggle; the log days as a number with "days" beside it, still named "Keep run logs for
   (days)"), restic (the one in use as a chip and a path, the same two rows with spinners while
   it's found off the UI thread, so nothing below moves when it is; the override with Browse, Save only
@@ -1184,7 +1188,8 @@ own scroll place.
   title) and Reset (a danger button). A confirmation's deleting choice is the filled red
   button.
 
-**The Scheduled-tasks view (in Settings; nothing hidden):** every task in
+**The Schedules page (`ui/schedules.rs`, in the sidebar; nothing hidden, so it lists the tasks
+whatever runs the schedules):** every task in
 Replica's Task Scheduler folder (`Scheduler::list`), with its job, schedule, next and last run
 (with Replica's exit code in words, or Task Scheduler's own code) and on/off. A task whose job
 is gone is flagged **"No such job any more"**. Each can be turned on or off, or deleted (after a
@@ -1236,9 +1241,10 @@ example the same variable: it uses that prefix and leaves it for its owner to re
 - `crates/replica/tests/window_frame.rs` drives the frame against a fake backend that records
   what it asks of the tray, Explorer and the browser: each menu's commands reach their action
   (New job…, Import and Export, the folders, Close window's tray notice, Exit's `Quit`, Run all
-  and Stop, the pages, Scheduled tasks…, Task Scheduler, GitHub, About) and are greyed out when
-  they don't apply; the shortcuts; the sidebar has only Jobs, History and Restore, Settings and
-  About coming from the menus; View > Status bar turns it off and on and `settings.toml`
+  and Stop, the five pages, Task Scheduler, GitHub, About) and are greyed out when they don't
+  apply; Tools holds only Task Scheduler; the shortcuts, Ctrl+4 and Ctrl+, too; the sidebar has
+  Jobs, History, Restore, Schedules and Settings, About coming from Help; Settings has the
+  scheduling options but not the tasks, and its link goes to Schedules, which has them; View > Status bar turns it off and on and `settings.toml`
   remembers it in a new window; the frame follows a settings file changed while another page
   shows (Run all and the next run); at the narrowest window, with long names, a wait and
   problems, nothing in the status bar passes the edge and the problems stay; the status bar
@@ -1252,9 +1258,9 @@ example the same variable: it uses that prefix and leaves it for its owner to re
   there; a table row in the whole window is clicked by its node; in Restore,
   switching the job or the target lists only its own snapshots (also when the old job's answer
   comes late), and the last test restore shown is the chosen target's.
-- `crates/replica/tests/window_settings.rs` drives the Settings tab against the real
-  backend and the **real Task Scheduler in a test-only `\ReplicaTest-<pid>-<time>-<test>`
-  folder**, emptied and removed when each test ends: the tasks view lists the tasks and flags
+- `crates/replica/tests/window_settings.rs` drives the Settings and Schedules pages against the
+  real backend and the **real Task Scheduler in a test-only `\ReplicaTest-<pid>-<time>-<test>`
+  folder**, emptied and removed when each test ends: the Schedules page lists the tasks and flags
   an orphan, turns one off and on, deletes one (Cancel first) and removes all; turning Task
   Scheduler off deletes the tasks, or keeps them turned off; every setting round-trips through
   `settings.toml` with `Reload` sent, and Reset keeps the jobs. Its `TaskFolder` guard is made

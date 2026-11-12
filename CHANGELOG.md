@@ -6,9 +6,18 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- Schedules and Settings are in the window's sidebar (Settings at its foot) and in the View
+  menu, with Ctrl+4 for Schedules and Ctrl+, for Settings as before. The Tools menu keeps only
+  Windows Task Scheduler.
+- Replica's tasks in Task Scheduler have a page of their own, **Schedules**, rather than a section
+  of Settings. Settings' tab for what runs the schedules and pausing them is now **Scheduling**,
+  and links to the page.
+
 ### Fixed
 
-- Tables (Jobs, History, Restore's snapshots and Scheduled tasks) fill the window's width
+- Tables (Jobs, History, Restore's snapshots and Schedules' tasks) fill the window's width
   when it's maximised or made wider, as the rest of the page does, and fit again when it's
   made narrower. Before, a table kept the column widths it was first shown with. A column
   you resize by hand keeps its width, and the widest column (a job's or task's name, or a

@@ -1,4 +1,5 @@
-//! Replica's window: every job listed and editable, with History, Restore and Settings tabs;
+//! Replica's window: every job listed and editable, with History, Restore, Schedules and
+//! Settings pages;
 //! closing or minimising it goes to the tray.
 //!
 //! It's egui (eframe, with the glow renderer and AccessKit, so Narrator reads it), on a thread
@@ -19,6 +20,7 @@ pub mod icons;
 pub mod jobs;
 pub mod menu;
 pub mod restore;
+pub mod schedules;
 pub mod settings;
 pub mod shell;
 pub mod status_bar;

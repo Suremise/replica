@@ -10,7 +10,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/jobs-dark.png">
-  <img src="docs/screenshots/jobs-light.png" alt="Replica's window on its Jobs page: a menu bar (File, Jobs, View, Tools, Help), a sidebar of Jobs, History and Restore, and a table of six backup jobs with their status (OK, running at 42%, failed, skipped, never run and waiting its turn), last and next run, schedule, targets and actions; along the bottom, a status bar with the running job's progress, the next run, 1 failed and 1 skipped, and the built-in timer">
+  <img src="docs/screenshots/jobs-light.png" alt="Replica's window on its Jobs page: a menu bar (File, Jobs, View, Tools, Help), a sidebar of Jobs, History, Restore, Schedules and Settings, and a table of six backup jobs with their status (OK, running at 42%, failed, skipped, never run and waiting its turn), last and next run, schedule, targets and actions; along the bottom, a status bar with the running job's progress, the next run, 1 failed and 1 skipped, and the built-in timer">
 </picture>
 
 Replica backs up your folders to an external drive or a NAS share on a schedule. Each backup is a

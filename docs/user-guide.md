@@ -201,15 +201,17 @@ A job's schedule is one of:
 Without a schedule, a job runs only when you ask. A run missed while the PC was off runs once,
 when Replica is back; it isn't repeated for each missed time.
 
-**What runs the schedules** is set in **Settings > Schedules** (**Tools > Settings…**, Ctrl+,):
+**What runs the schedules** is set in **Settings > Scheduling** (**Settings** in the sidebar,
+Ctrl+,):
 
 - **The built-in timer (the default):** the tray app runs schedules while it's running. Keep
   **Start with Windows** on (in the tray menu or Settings) so it always is.
 - **Windows Task Scheduler (off by default):** Replica makes a task for each scheduled job, in Task
   Scheduler's "Replica" folder, for your account only and with no admin rights. Backups then run
-  even when the tray app isn't running, **while you're logged on**. **Tools > Scheduled tasks…**
-  shows every task, with its next and last run, and lets you turn each on or off, delete one or
-  all, or open Task Scheduler itself. A task whose job is gone is flagged. Turning the option off
+  even when the tray app isn't running, **while you're logged on**. The **Schedules** page (in the
+  sidebar, Ctrl+4) shows every task, with its next and last run, and lets you turn each on or off,
+  delete one or all, or open Task Scheduler itself. A task whose job is gone is flagged. Turning
+  the option off
   asks whether to delete the tasks (the default) or keep them turned off; the built-in timer then
   takes over.
 
@@ -225,18 +227,19 @@ for when it was due, its last good backup and how its last run ended.
 
 ## The window
 
-Across the top is a menu bar; down the left, the three pages you use most (**Jobs**, **History**
-and **Restore**); along the bottom, a status bar.
+Across the top is a menu bar; down the left, the pages (**Jobs**, **History**, **Restore** and
+**Schedules**, with **Settings** at the foot); along the bottom, a status bar. In a narrow window
+the sidebar shows only the pages' icons: hover over one for its name.
 
 - **File:** **New job…** (Ctrl+N), **Import jobs…** and **Export jobs…** (as the Jobs page's
   buttons), **Open settings folder**, **Open log folder**, **Close window** (to the notification
   area, as the window's close button does) and **Exit Replica** (as **Quit** in the tray menu).
 - **Jobs:** **Run all** (every job that's on) and **Stop running jobs** (the one running and those
   waiting their turn).
-- **View:** the pages (Ctrl+1, Ctrl+2, Ctrl+3) and **Status bar**, to hide or show it (remembered,
-  as `show_status_bar` in the settings file).
-- **Tools:** **Settings…** (Ctrl+,), **Scheduled tasks…** (the Settings page at its Schedules tab)
-  and **Windows Task Scheduler**.
+- **View:** the pages, as in the sidebar: **Jobs** (Ctrl+1), **History** (Ctrl+2), **Restore**
+  (Ctrl+3), **Schedules** (Ctrl+4) and **Settings** (Ctrl+,); then **Status bar**, to hide or show
+  it (remembered, as `show_status_bar` in the settings file).
+- **Tools:** **Windows Task Scheduler**, to open Windows' own.
 - **Help:** **Replica on GitHub** and **About Replica** (the version, the licence and the
   third-party notices).
 
@@ -462,7 +465,7 @@ settings and history travel with it. If its folder can't be written to (a read-o
 folder), Replica says so and saves nothing anywhere else.
 
 Share logins and repository passwords are always in Windows Credential Manager, in both cases.
-**Settings > Storage** (**Tools > Settings…**) shows the exact folders, under **Where Replica
+**Settings > Storage** shows the exact folders, under **Where Replica
 keeps its files**, with buttons to open them; **File > Open settings folder** opens Replica's.
 
 Uninstalling the MSI (Settings > Apps) removes the program, Replica's scheduled tasks and its Start
@@ -543,5 +546,5 @@ file is fixed.
 
 **A job didn't run on schedule.** Check **Pause schedules** is off and the job is **On**. With the
 built-in timer, the tray app must be running (turn on **Start with Windows**). With Task Scheduler,
-check **Tools > Scheduled tasks…**: its task should be on, and runs happen only while you're
+check the **Schedules** page: its task should be on, and runs happen only while you're
 logged on.

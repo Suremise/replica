@@ -21,6 +21,7 @@ tray-notice-dont-show = Don't show this again
 tab-jobs = Jobs
 tab-history = History
 tab-restore = Restore
+tab-schedules = Schedules
 tab-settings = Settings
 tab-about = About
 
@@ -31,6 +32,7 @@ nav-pages = Pages
 page-jobs-subtitle = What Replica backs up, where to, and when
 page-history-subtitle = Every run and test restore, newest first
 page-restore-subtitle = Get files back from a backup
+page-schedules-subtitle = Replica's tasks in Windows Task Scheduler
 page-settings-subtitle = How Replica runs, and where it keeps its files
 page-about-subtitle = The version, the licence and the third-party notices
 
@@ -372,7 +374,7 @@ size-tb = { $value } TB
 
 # The tab list under the page's header, and its tabs.
 settings-tabs = Settings sections
-settings-tab-schedules = Schedules
+settings-tab-scheduling = Scheduling
 settings-tab-general = General
 settings-tab-restic = restic
 settings-tab-storage = Storage
@@ -384,6 +386,7 @@ settings-mode-tasks-help = Windows Task Scheduler runs the jobs on their schedul
 settings-mode-help =
     Task Scheduler runs the jobs only while you're logged on to Windows. When it's off, the
     built-in timer takes over. The two never both run a job.
+settings-see-schedules = See Replica's tasks in Task Scheduler on the Schedules page
 settings-pause-help = No job runs on its schedule until you turn this off. Run now still works.
 settings-start-with-windows-help = Starts Replica's tray app when you sign in to Windows.
 # Its accessible name: the unit is shown beside the number (settings-days-unit).
@@ -411,9 +414,9 @@ settings-reset-body =
     are, and so do their backups.
 settings-reset-done = The settings are back to their defaults. Your jobs are unchanged.
 
-## The Scheduled-tasks view (in Settings)
+## The Schedules page: Replica's tasks in Task Scheduler
 
-tasks-title = Scheduled tasks
+tasks-title = Task Scheduler tasks
 tasks-help =
     These are Replica's tasks in Windows Task Scheduler, in its "Replica" folder. Replica makes
     one for each scheduled job while the Task Scheduler option is on. You can turn each on or

@@ -21,11 +21,11 @@ menu-view = View
 menu-view-jobs = Jobs
 menu-view-history = History
 menu-view-restore = Restore
+menu-view-schedules = Schedules
+menu-view-settings = Settings
 menu-status-bar = Status bar
 
 menu-tools = Tools
-menu-settings = Settings…
-menu-scheduled-tasks = Scheduled tasks…
 menu-task-scheduler = Windows Task Scheduler
 
 menu-help = Help

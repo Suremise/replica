@@ -1,4 +1,4 @@
-//! The Settings tab and its Scheduled-tasks view, driven through egui's accessibility tree with
+//! The Settings page and the Schedules page (Replica's tasks), driven through egui's accessibility tree with
 //! `egui_kittest`, against the real backend: a temp app folder, and the real Task Scheduler in
 //! a test-only `\ReplicaTest-<pid>-<time>-<test>` folder, emptied and removed when each test
 //! ends, pass or fail. The tasks point at an exe that doesn't exist and are never run.
@@ -11,8 +11,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use replica::ui::backend::{Backend, LiveBackend, UiRequest};
+use replica::ui::schedules::SchedulesTab;
 use replica::ui::settings::{Confirm, SettingsTab};
 use replica_core::job::{Job, Source, Target, VolumeRef};
 use replica_core::settings::{ScheduleMode, Settings};
@@ -157,14 +158,47 @@ impl Fixture {
                 SettingsTab::new(Arc::clone(&self.backend) as Arc<dyn Backend>),
             )
     }
+
+    /// The Schedules page, `width` points wide.
+    fn schedules(&self, width: f32) -> Harness<'static, SchedulesTab> {
+        Harness::builder()
+            .with_size([width, 1600.0])
+            .with_context_setup(|ctx| {
+                replica::ui::fonts::install(ctx).unwrap();
+                replica::ui::style(ctx);
+            })
+            .build_ui_state(
+                |ui, tab: &mut SchedulesTab| tab.ui(ui),
+                SchedulesTab::new(Arc::clone(&self.backend) as Arc<dyn Backend>),
+            )
+    }
 }
 
-/// Shows Settings' tab `name`.
+/// Shows Settings' tab `name`, and waits until it's the one selected.
 fn pick_tab(harness: &mut Harness<'_, SettingsTab>, name: &str) {
+    let tab = |h: &Harness<'_, SettingsTab>| {
+        h.query_by_role_and_label(egui::accesskit::Role::Tab, name)
+            .is_some_and(|t| t.accesskit_node().is_selected() == Some(true))
+    };
+    step_until(harness, |h| {
+        h.query_by_role_and_label(egui::accesskit::Role::Tab, name)
+            .is_some()
+    });
     harness
         .get_by_role_and_label(egui::accesskit::Role::Tab, name)
-        .click();
-    harness.run_steps(3);
+        .click_accesskit();
+    step_until(harness, tab);
+}
+
+/// Clicks the last control named `name` (a dialog's, over the page's own of that name) through
+/// AccessKit, once it's there.
+fn click_last<S>(harness: &mut Harness<'_, S>, name: &str) {
+    step_until(harness, |h| h.query_all_by_label(name).last().is_some());
+    harness
+        .query_all_by_label(name)
+        .last()
+        .expect("found above")
+        .click_accesskit();
 }
 
 /// Steps until `done` (a setting saved, the restic version found on a thread), for at most 30 s:
@@ -183,31 +217,15 @@ fn a_narrow_window_scrolls_the_tasks_table_sideways_to_its_last_columns() {
     // Narrower than the table's columns, as the page is at the window's least width.
     const WIDTH: f32 = 600.0;
     let f = Fixture::new("narrow");
-    let mut harness = Harness::builder()
-        .with_size([WIDTH, 1600.0])
-        .with_context_setup(|ctx| {
-            replica::ui::fonts::install(ctx).unwrap();
-            replica::ui::style(ctx);
-        })
-        .build_ui_state(
-            |ui, tab: &mut SettingsTab| tab.ui(ui),
-            SettingsTab::new(Arc::clone(&f.backend) as Arc<dyn Backend>),
-        );
-    // Each step waits for what it needs, never a fixed few frames: the tab, then its tasks
-    // (read from Task Scheduler) laid out.
-    step_until(&mut harness, |h| {
-        h.query_by_role_and_label(egui::accesskit::Role::Tab, "Schedules")
-            .is_some()
-    });
-    harness
-        .get_by_role_and_label(egui::accesskit::Role::Tab, "Schedules")
-        .click();
+    let mut harness = f.schedules(WIDTH);
+    // Each step waits for what it needs, never a fixed few frames: the tasks (read from Task
+    // Scheduler) laid out.
     step_until(&mut harness, |h| {
         h.query_by_label("Delete the task docs").is_some()
             && h.query_by_label("daily 02:30").is_some()
     });
     settle(&mut harness);
-    let delete = |h: &Harness<'_, SettingsTab>| h.get_by_label("Delete the task docs").rect();
+    let delete = |h: &Harness<'_, SchedulesTab>| h.get_by_label("Delete the task docs").rect();
     assert!(
         delete(&harness).left() > WIDTH,
         "past the edge at first: {:?}",
@@ -243,11 +261,18 @@ fn settle<S>(harness: &mut Harness<'_, S>) {
 }
 
 #[test]
-fn the_tasks_view_lists_flags_orphans_turns_off_and_deletes() {
+fn the_schedules_page_lists_flags_orphans_turns_off_and_deletes() {
     let f = Fixture::new("view");
-    let mut harness = f.harness();
-    harness.run_steps(3);
-    pick_tab(&mut harness, "Schedules");
+    let mut harness = f.schedules(1300.0);
+    // The tasks, read from Task Scheduler, laid out.
+    step_until(&mut harness, |h| {
+        h.query_by_label("No such job any more").is_some()
+            && h.query_by_label("Turn off the task docs").is_some()
+    });
+    settle(&mut harness);
+    // Replica's tasks in Task Scheduler, and Windows' own a click away.
+    harness.get_by_role_and_label(egui::accesskit::Role::Heading, "Task Scheduler tasks");
+    harness.get_by_label("Open Task Scheduler");
     // "docs": the task, and its job.
     assert_eq!(harness.query_all_by_label("docs").count(), 2);
     // "music": its task only, flagged as an orphan.
@@ -255,44 +280,58 @@ fn the_tasks_view_lists_flags_orphans_turns_off_and_deletes() {
     harness.get_by_label("No such job any more");
     harness.check_accessibility();
 
-    harness.get_by_label("Turn off the task docs").click();
-    harness.run_steps(3);
+    // Turned off, and on again: Task Scheduler changes, and the row's switch says so.
+    harness
+        .get_by_label("Turn off the task docs")
+        .click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Turn on the task docs").is_some()
+    });
     assert_eq!(f.tasks(), [("docs".into(), false), ("music".into(), true)]);
-    harness.get_by_label("Turn on the task docs").click();
-    harness.run_steps(3);
+    harness
+        .get_by_label("Turn on the task docs")
+        .click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Turn off the task docs").is_some()
+    });
     assert_eq!(f.tasks()[0], ("docs".into(), true));
 
-    harness.get_by_label("Delete the task music").click();
-    harness.run_steps(3);
-    harness.get_by_label("Delete the task music?");
+    // Delete asks first: Cancel deletes nothing.
     harness
-        .query_all_by_label("Cancel")
-        .last()
-        .expect("the window's Cancel")
-        .click();
-    harness.run_steps(3);
+        .get_by_label("Delete the task music")
+        .click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Delete the task music?").is_some()
+    });
+    click_last(&mut harness, "Cancel");
+    step_until(&mut harness, |h| {
+        h.query_by_label("Delete the task music?").is_none()
+    });
     assert_eq!(f.tasks().len(), 2, "cancel deletes nothing");
-    harness.get_by_label("Delete the task music").click();
-    harness.run_steps(3);
     harness
-        .query_all_by_label("Delete")
-        .last()
-        .expect("the window's Delete")
-        .click();
-    harness.run_steps(3);
+        .get_by_label("Delete the task music")
+        .click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Delete the task music?").is_some()
+    });
+    click_last(&mut harness, "Delete");
+    step_until(&mut harness, |h| {
+        h.query_by_label("Delete the task music").is_none()
+    });
     assert_eq!(f.tasks(), [("docs".into(), true)]);
 
-    harness.get_by_label("Remove all Replica tasks").click();
-    harness.run_steps(3);
-    harness.get_by_label("Remove all of Replica's tasks?");
     harness
-        .query_all_by_label("Remove all Replica tasks")
-        .last()
-        .unwrap()
-        .click();
-    harness.run_steps(3);
+        .get_by_label("Remove all Replica tasks")
+        .click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Remove all of Replica's tasks?").is_some()
+    });
+    click_last(&mut harness, "Remove all Replica tasks");
+    step_until(&mut harness, |h| {
+        h.query_by_label("Replica has no tasks in Task Scheduler.")
+            .is_some()
+    });
     assert!(f.tasks().is_empty());
-    harness.get_by_label("Replica has no tasks in Task Scheduler.");
 }
 
 #[test]
@@ -300,11 +339,14 @@ fn turning_task_scheduler_off_deletes_its_tasks_unless_kept() {
     for keep in [false, true] {
         let f = Fixture::new(if keep { "keep" } else { "delete" });
         let mut harness = f.harness();
-        harness.run_steps(3);
-        pick_tab(&mut harness, "Schedules");
+        pick_tab(&mut harness, "Scheduling");
         let _ = f.reloads();
-        harness.get_by_label_contains("Built-in timer").click();
-        harness.run_steps(3);
+        harness
+            .get_by_label_contains("Built-in timer")
+            .click_accesskit();
+        step_until(&mut harness, |h| {
+            h.query_by_label("Turn Task Scheduler off?").is_some()
+        });
         assert_eq!(harness.state().confirm, Some(Confirm::TurnOff));
         assert_eq!(
             f.settings().app.schedule_mode,
@@ -316,9 +358,10 @@ fn turning_task_scheduler_off_deletes_its_tasks_unless_kept() {
         } else {
             "Delete the tasks"
         };
-        harness.get_by_label(answer).click();
-        harness.run_steps(3);
-        assert_eq!(f.settings().app.schedule_mode, ScheduleMode::Timer);
+        harness.get_by_label(answer).click_accesskit();
+        step_until(&mut harness, |_| {
+            f.settings().app.schedule_mode == ScheduleMode::Timer
+        });
         assert_eq!(f.reloads(), 1, "the tray is told");
         if keep {
             assert_eq!(f.tasks(), [("docs".into(), false), ("music".into(), false)]);
@@ -332,13 +375,22 @@ fn turning_task_scheduler_off_deletes_its_tasks_unless_kept() {
 fn every_setting_round_trips_and_reset_keeps_the_jobs() {
     let f = Fixture::new("settings");
     let mut harness = f.harness();
-    harness.run_steps(3);
 
-    pick_tab(&mut harness, "Schedules");
-    harness.get_by_label("Pause schedules").click();
+    pick_tab(&mut harness, "Scheduling");
+    step_until(&mut harness, |h| {
+        h.query_by_label("Pause schedules").is_some()
+    });
+    // The options only: Replica's tasks are on the Schedules page.
+    assert!(harness.query_by_label("Task Scheduler tasks").is_none());
+    assert!(harness.query_by_label("Remove all Replica tasks").is_none());
+    assert!(harness.query_by_label("Open Task Scheduler").is_none());
+    harness.get_by_label("Pause schedules").click_accesskit();
     step_until(&mut harness, |_| f.settings().app.pause_schedules);
     pick_tab(&mut harness, "General");
-    harness.get_by_label("Start with Windows").click();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Start with Windows").is_some()
+    });
+    harness.get_by_label("Start with Windows").click_accesskit();
     step_until(&mut harness, |_| f.settings().app.start_with_windows);
 
     pick_tab(&mut harness, "restic");
@@ -350,7 +402,11 @@ fn every_setting_round_trips_and_reset_keeps_the_jobs() {
     harness
         .get_by_label("restic.exe")
         .set_text_value_accesskit(&restic.to_string_lossy());
-    harness.run_steps(3);
+    // Save turns on once the path typed differs from the one saved.
+    step_until(&mut harness, |h| {
+        h.query_by_label("Save")
+            .is_some_and(|b| !b.accesskit_node().is_disabled())
+    });
     // The restic in use is looked for again on a thread whenever the path changes, and what it
     // finds changes the card's height: these buttons are pressed through AccessKit, as a
     // screen reader does, so a frame that moves them can't make the press miss.
@@ -364,6 +420,9 @@ fn every_setting_round_trips_and_reset_keeps_the_jobs() {
     step_until(&mut harness, |_| f.settings().app.restic_path.is_none());
 
     pick_tab(&mut harness, "General");
+    step_until(&mut harness, |h| {
+        h.query_by_label("Keep run logs for (days)").is_some()
+    });
     harness
         .get_by_label("Keep run logs for (days)")
         .set_value_accesskit(45.0);
@@ -372,23 +431,30 @@ fn every_setting_round_trips_and_reset_keeps_the_jobs() {
     // Where the files are, as the app's paths say.
     pick_tab(&mut harness, "Storage");
     let places = f.backend.places();
-    harness.get_by_label(&places.settings.display().to_string());
+    let settings_file = places.settings.display().to_string();
+    step_until(&mut harness, |h| h.query_by_label(&settings_file).is_some());
     harness.get_by_label("Installed");
 
     pick_tab(&mut harness, "General");
-    harness.get_by_label("Reset settings").click();
-    harness.run_steps(3);
-    harness.get_by_label("Reset Replica's settings?");
-    harness
-        .query_all_by_label("Reset settings")
-        .last()
-        .unwrap()
-        .click();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Reset settings").is_some()
+    });
+    harness.get_by_label("Reset settings").click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Reset Replica's settings?").is_some()
+    });
+    click_last(&mut harness, "Reset settings");
     step_until(&mut harness, |_| f.settings().app == Default::default());
     let settings = f.settings();
     assert_eq!(settings.jobs.len(), 1, "the jobs stay");
     assert!(f.tasks().is_empty(), "Task Scheduler was on: its tasks go");
     harness.check_accessibility();
+    // Reset looks for the restic in use again, on a thread that runs restic: the test waits
+    // for it to answer, so no restic outlives it (docs/TESTING.md, no process left running).
+    pick_tab(&mut harness, "restic");
+    step_until(&mut harness, |h| {
+        h.query_by_label_contains("In use:").is_some()
+    });
 }
 
 #[test]

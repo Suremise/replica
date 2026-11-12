@@ -1,7 +1,7 @@
 //! The window's frame, driven through egui's accessibility tree with `egui_kittest`: the menu
 //! bar's commands each reach their action, the shortcuts work, the status bar follows the tray
-//! and is turned off and on from View (remembered in `settings.toml`), and Settings and About
-//! are reached from the menus, not the sidebar. Against a fake backend that records what the
+//! and is turned off and on from View (remembered in `settings.toml`), and the sidebar's five
+//! pages are in View too, About in Help. Against a fake backend that records what the
 //! window asks (the tray, Explorer, the browser) instead of doing it.
 
 #![cfg(windows)]
@@ -16,7 +16,6 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use replica::ui::Shared;
 use replica::ui::backend::{Backend, LastRun, Places, RestoreJob, Status, TargetCheck, UiRequest};
 use replica::ui::geometry::WindowState;
-use replica::ui::settings::Page;
 use replica::ui::shell::{Shell, Tab};
 use replica_core::cancel::CancelToken;
 use replica_core::history::{HistoryFilter, RunRecord, TestRestoreRecord};
@@ -318,42 +317,89 @@ fn the_menu_bar_has_its_menus_and_each_item_names_its_shortcut() {
     harness.key_press(Key::Escape);
     let _ = harness.try_run();
     harness
-        .get_by_role_and_label(Role::MenuItem, "Tools")
+        .get_by_role_and_label(Role::MenuItem, "View")
         .click_accesskit();
     let _ = harness.try_run();
-    assert_eq!(
-        harness
-            .get_by_role_and_label(Role::MenuItem, "Settings…")
-            .accesskit_node()
-            .data()
-            .keyboard_shortcut(),
-        Some("Ctrl+,")
-    );
+    for (page, shortcut) in [
+        ("Jobs", "Ctrl+1"),
+        ("History", "Ctrl+2"),
+        ("Restore", "Ctrl+3"),
+        ("Schedules", "Ctrl+4"),
+        ("Settings", "Ctrl+,"),
+    ] {
+        assert_eq!(
+            harness
+                .get_by_role_and_label(Role::MenuItemRadio, page)
+                .accesskit_node()
+                .data()
+                .keyboard_shortcut(),
+            Some(shortcut),
+            "{page}"
+        );
+    }
     harness.check_accessibility();
 }
 
 #[test]
-fn settings_and_about_are_reached_from_the_menus_not_the_sidebar() {
+fn schedules_and_settings_are_in_the_sidebar_and_about_in_help() {
     let fixture = Fixture::new();
     let mut harness = fixture.harness();
     let tabs: Vec<String> = harness
         .get_all_by_role(Role::Tab)
         .map(|t| t.accesskit_node().label().unwrap_or_default())
         .collect();
-    assert_eq!(tabs, ["Jobs", "History", "Restore"]);
+    assert_eq!(
+        tabs,
+        ["Jobs", "History", "Restore", "Schedules", "Settings"]
+    );
 
-    choose(&mut harness, "Tools", "Settings…");
-    assert_eq!(harness.state().tab, Tab::Settings);
-    // No page in the sidebar is the one shown.
-    for page in ["Jobs", "History", "Restore"] {
+    for (page, subtitle) in [
+        ("Schedules", "Replica's tasks in Windows Task Scheduler"),
+        ("Settings", "How Replica runs, and where it keeps its files"),
+    ] {
+        harness.get_by_role_and_label(Role::Tab, page).click();
+        let _ = harness.try_run();
+        assert_eq!(harness.state().tab.title(), page);
         let tab = harness.get_by_role_and_label(Role::Tab, page);
-        assert_eq!(tab.accesskit_node().is_selected(), Some(false), "{page}");
+        assert_eq!(tab.accesskit_node().is_selected(), Some(true), "{page}");
+        harness.get_by_label(subtitle);
     }
-    harness.get_by_label("How Replica runs, and where it keeps its files");
 
     choose(&mut harness, "Help", "About Replica");
     assert_eq!(harness.state().tab, Tab::About);
+    // About isn't in the sidebar: none of its pages is the one shown.
+    for page in ["Jobs", "History", "Restore", "Schedules", "Settings"] {
+        let tab = harness.get_by_role_and_label(Role::Tab, page);
+        assert_eq!(tab.accesskit_node().is_selected(), Some(false), "{page}");
+    }
     harness.get_by_label_contains(env!("CARGO_PKG_VERSION"));
+}
+
+#[test]
+fn the_schedules_page_has_the_tasks_and_settings_only_the_options() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness();
+    choose(&mut harness, "View", "Settings");
+    assert_eq!(harness.state().tab, Tab::Settings);
+    harness.get_by_label("Pause schedules");
+    assert!(harness.query_by_label("Task Scheduler tasks").is_none());
+    assert!(harness.query_by_label("Remove all Replica tasks").is_none());
+
+    // Settings links to the page with the tasks.
+    harness
+        .get_by_label("See Replica's tasks in Task Scheduler on the Schedules page")
+        .click_accesskit();
+    let _ = harness.try_run();
+    assert_eq!(harness.state().tab, Tab::Schedules);
+    harness.get_by_role_and_label(Role::Heading, "Task Scheduler tasks");
+    harness.get_by_label("Replica has no tasks in Task Scheduler.");
+    harness
+        .get_by_label("Open Task Scheduler")
+        .click_accesskit();
+    let _ = harness.try_run();
+    assert_eq!(fixture.fake.asked(), [Asked::TaskScheduler]);
+    assert!(harness.query_by_label("Pause schedules").is_none());
+    harness.check_accessibility();
 }
 
 #[test]
@@ -436,6 +482,8 @@ fn view_tools_and_help_reach_their_pages_and_pages() {
     for (item, tab) in [
         ("History", Tab::History),
         ("Restore", Tab::Restore),
+        ("Schedules", Tab::Schedules),
+        ("Settings", Tab::Settings),
         ("Jobs", Tab::Jobs),
     ] {
         choose(&mut harness, "View", item);
@@ -446,19 +494,33 @@ fn view_tools_and_help_reach_their_pages_and_pages() {
         .get_by_role_and_label(Role::MenuItem, "View")
         .click_accesskit();
     let _ = harness.try_run();
-    let ticked: Vec<String> = harness
-        .get_all_by_role(Role::MenuItemRadio)
-        .filter(|n| n.accesskit_node().toggled() == Some(Toggled::True))
-        .map(|n| n.accesskit_node().label().unwrap_or_default())
-        .collect();
-    assert_eq!(ticked, ["Jobs"]);
+    let pages = |h: &Harness<'_, Shell>, toggled: Option<Toggled>| -> Vec<String> {
+        h.get_all_by_role(Role::MenuItemRadio)
+            .filter(|n| toggled.is_none_or(|t| n.accesskit_node().toggled() == Some(t)))
+            .map(|n| n.accesskit_node().label().unwrap_or_default())
+            .collect()
+    };
+    assert_eq!(
+        pages(&harness, None),
+        ["Jobs", "History", "Restore", "Schedules", "Settings"]
+    );
+    assert_eq!(pages(&harness, Some(Toggled::True)), ["Jobs"]);
     harness.key_press(Key::Escape);
     let _ = harness.try_run();
 
-    harness.state_mut().settings.page = Page::Storage;
-    choose(&mut harness, "Tools", "Scheduled tasks…");
-    assert_eq!(harness.state().tab, Tab::Settings);
-    assert_eq!(harness.state().settings.page, Page::Schedules);
+    // Tools holds Windows' own Task Scheduler, and nothing else.
+    harness
+        .get_by_role_and_label(Role::MenuItem, "Tools")
+        .click_accesskit();
+    let _ = harness.try_run();
+    let tools: Vec<String> = harness
+        .get_all_by_role(Role::MenuItem)
+        .filter(|n| n.accesskit_node().data().has_popup().is_none())
+        .map(|n| n.accesskit_node().label().unwrap_or_default())
+        .collect();
+    assert_eq!(tools, ["Windows Task Scheduler"]);
+    harness.key_press(Key::Escape);
+    let _ = harness.try_run();
 
     choose(&mut harness, "Tools", "Windows Task Scheduler");
     choose(&mut harness, "Help", "Replica on GitHub");
@@ -478,6 +540,7 @@ fn the_shortcuts_work() {
     for (key, tab) in [
         (Key::Num2, Tab::History),
         (Key::Num3, Tab::Restore),
+        (Key::Num4, Tab::Schedules),
         (Key::Num1, Tab::Jobs),
         (Key::Comma, Tab::Settings),
     ] {

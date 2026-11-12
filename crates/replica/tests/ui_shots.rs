@@ -14,9 +14,10 @@
 //! ```
 //!
 //! Screens: `gallery` (every component, [`gallery`]) and the shell with each page (`jobs`,
-//! `history`, `restore`, `settings`, `about`, and each menu open: `menu-file` and the like), on a
-//! temp app folder with two jobs, against the real backend with a test-only Credential Manager
-//! prefix and Task Scheduler folder (nothing is made in either). New screens are added to [`screens`].
+//! `history`, `restore`, `schedules`, `settings`, `about`, and each menu open: `menu-file` and
+//! the like), on a temp app folder with two jobs, against the real backend with a test-only
+//! Credential Manager prefix and Task Scheduler folder (nothing is made in either). New screens
+//! are added to [`screens`].
 //!
 //! The same screens are also driven through the accessibility tree, as plain tests: the
 //! sidebar is read as tabs and switches pages (the menu bar and status bar are
@@ -924,8 +925,9 @@ fn save<S>(harness: &mut Harness<'_, S>, scale: f32, path: &Path) {
 /// For a narrow shot (the window's least width), adds a line to `bounds.txt` beside it for
 /// each node in the accessibility tree, whatever its role, that reaches past the window's right
 /// edge: something cut off there, or in a table that scrolls sideways on purpose (History's,
-/// Scheduled tasks'). Every node counts, text and the tables' list boxes too, so a table or
-/// a card that grows past the edge shows even where its cells have no node of their own.
+/// the Schedules page's tasks). Every node counts, text and the tables' list boxes too, so a
+/// table or a card that grows past the edge shows even where its cells have no node of their
+/// own.
 /// "none" when there isn't one, so every narrow shot is accounted for.
 fn report_bounds<S>(harness: &Harness<'_, S>, path: &Path) {
     use egui_kittest::kittest::{By, NodeT, Queryable};
@@ -1009,6 +1011,7 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
         ("jobs", Tab::Jobs),
         ("history", Tab::History),
         ("restore", Tab::Restore),
+        ("schedules", Tab::Schedules),
         ("settings", Tab::Settings),
         ("about", Tab::About),
     ] {
@@ -1022,7 +1025,7 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
             }),
         ));
     }
-    // The whole Settings page with Task Scheduler's tasks (on, with two), none, and an
+    // The whole Schedules page with Task Scheduler's tasks (on, with two), none, and an
     // orphan; About in full.
     let docs = || task("Documents", "daily 02:30", true, Some(0));
     let photos = || task("Photos", "every 6h", false, Some(2));
@@ -1033,13 +1036,13 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
     };
     for (name, mode, tasks) in [
         (
-            "settings-tasks",
+            "schedules-tasks",
             ScheduleMode::TaskScheduler,
             vec![docs(), photos()],
         ),
-        ("settings-none", ScheduleMode::Timer, vec![]),
+        ("schedules-none", ScheduleMode::Timer, vec![]),
         (
-            "settings-orphan",
+            "schedules-orphan",
             ScheduleMode::TaskScheduler,
             vec![docs(), photos(), orphan()],
         ),
@@ -1048,9 +1051,9 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
             name,
             Box::new(move |v: Variant, path: &Path| {
                 let fixture = Fixture::with(mode, tasks.clone());
-                let mut harness = v.builder(2100.0).build_ui_state(
+                let mut harness = v.builder(1100.0).build_ui_state(
                     |ui, shell: &mut Shell| shell.show(ui),
-                    fixture.shell(Tab::Settings),
+                    fixture.shell(Tab::Schedules),
                 );
                 save(&mut harness, v.scale, path);
             }),
@@ -1160,6 +1163,7 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
         ("menu-jobs", "Jobs"),
         ("menu-view", "View"),
         ("menu-tools", "Tools"),
+        ("menu-help", "Help"),
     ] {
         screens.push((
             name,
@@ -1180,10 +1184,10 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
         ));
     }
     screens.extend(jobs_screens());
-    // Each of Settings' tabs (Schedules with Task Scheduler on and two tasks), and Jobs,
+    // Each of Settings' tabs (Scheduling with Task Scheduler on and two tasks), and Jobs,
     // at the window's first-run size.
     for (name, page) in [
-        ("settings-tab-schedules", Page::Schedules),
+        ("settings-tab-scheduling", Page::Scheduling),
         ("settings-tab-general", Page::General),
         ("settings-tab-restic", Page::Restic),
         ("settings-tab-storage", Page::Storage),
@@ -1534,8 +1538,11 @@ fn the_sidebar_is_read_as_tabs_and_switches_pages() {
         .get_all_by_role(Role::Tab)
         .map(|t| t.accesskit_node().label().unwrap_or_default())
         .collect();
-    // Settings and About are in the menus (tests/window_frame.rs).
-    assert_eq!(tabs, ["Jobs", "History", "Restore"]);
+    // About is in the Help menu (tests/window_frame.rs).
+    assert_eq!(
+        tabs,
+        ["Jobs", "History", "Restore", "Schedules", "Settings"]
+    );
     let selected = |h: &Harness<'_, Shell>, name: &str| {
         h.get_by_role_and_label(Role::Tab, name)
             .accesskit_node()
@@ -1631,21 +1638,22 @@ fn settings_tabs_are_read_as_a_tab_list_and_answer_the_arrow_keys() {
     harness.state_mut().tab = Tab::Settings;
     let _ = harness.try_run();
     harness.get_by_role_and_label(Role::TabList, "Settings sections");
+    // Settings' own tabs: the sidebar's Settings is selected too, as the page shown.
     let selected = |h: &Harness<'_, Shell>| -> Vec<String> {
         h.get_all_by_role(Role::Tab)
             .filter(|n| n.accesskit_node().is_selected() == Some(true))
             .map(|n| n.accesskit_node().label().unwrap_or_default())
+            .filter(|name| name != "Settings")
             .collect()
     };
-    // Settings' own first tab (Settings itself is reached from the menus, not the sidebar).
-    assert_eq!(selected(&harness), ["Schedules"]);
-    harness.get_by_label("Scheduled tasks");
+    assert_eq!(selected(&harness), ["Scheduling"]);
+    harness.get_by_label("Pause schedules");
 
     harness.get_by_role_and_label(Role::Tab, "Storage").click();
     let _ = harness.try_run();
     assert_eq!(harness.state().settings.page, Page::Storage);
     harness.get_by_label("Where Replica keeps its files");
-    assert!(harness.query_by_label("Scheduled tasks").is_none());
+    assert!(harness.query_by_label("Pause schedules").is_none());
 
     // From the focused tab, the arrows move along (wrapping round), Home and End to the ends.
     harness.get_by_role_and_label(Role::Tab, "Storage").focus();
@@ -1653,19 +1661,19 @@ fn settings_tabs_are_read_as_a_tab_list_and_answer_the_arrow_keys() {
     for (key, page) in [
         (Key::ArrowLeft, Page::Restic),
         (Key::ArrowRight, Page::Storage),
-        (Key::ArrowRight, Page::Schedules),
+        (Key::ArrowRight, Page::Scheduling),
         (Key::End, Page::Storage),
-        (Key::Home, Page::Schedules),
+        (Key::Home, Page::Scheduling),
     ] {
         harness.key_press(key);
         let _ = harness.try_run();
         assert_eq!(harness.state().settings.page, page, "after {key:?}");
     }
-    assert_eq!(selected(&harness), ["Schedules"]);
+    assert_eq!(selected(&harness), ["Scheduling"]);
     // Still on the tabs: the arrows didn't take the focus off them.
     assert!(
         harness
-            .get_by_role_and_label(Role::Tab, "Schedules")
+            .get_by_role_and_label(Role::Tab, "Scheduling")
             .accesskit_node()
             .is_focused()
     );
@@ -1699,7 +1707,10 @@ fn a_narrow_window_has_a_rail_with_the_pages_names() {
         })
         .collect();
     let names: Vec<&str> = tabs.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, ["Jobs", "History", "Restore"]);
+    assert_eq!(
+        names,
+        ["Jobs", "History", "Restore", "Schedules", "Settings"]
+    );
     // Only the icons: each item is a rail's width, not the sidebar's.
     assert!(tabs.iter().all(|(_, w)| *w <= 48.0), "{tabs:?}");
     harness.get_by_role_and_label(Role::Tab, "Restore").click();
@@ -1833,8 +1844,8 @@ fn every_table_fills_its_width_as_the_window_grows_and_shrinks() {
         ),
         (
             Fixture::with(ScheduleMode::TaskScheduler, vec![docs(), photos()]),
-            Tab::Settings,
-            "Scheduled tasks",
+            Tab::Schedules,
+            "Task Scheduler tasks",
             "Actions",
             64.0,
         ),
