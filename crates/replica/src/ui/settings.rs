@@ -523,8 +523,9 @@ impl SettingsTab {
             return;
         }
         let columns = [
-            // The schedule gets its room first; a name that's cut shows whole on hover.
-            TableColumn::new(tr("tasks-col-task"), Some(120.0)),
+            // The task's name takes what the others leave; a name that's cut shows whole on
+            // hover.
+            TableColumn::new(tr("tasks-col-task"), None).at_least(120.0),
             TableColumn::new(tr("tasks-col-job"), Some(130.0)),
             TableColumn::new(tr("tasks-col-trigger"), Some(140.0)),
             TableColumn::new(tr("tasks-col-next"), Some(84.0)),

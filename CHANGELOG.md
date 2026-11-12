@@ -6,6 +6,14 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- Tables (Jobs, History, Restore's snapshots and Scheduled tasks) fill the window's width
+  when it's maximised or made wider, as the rest of the page does, and fit again when it's
+  made narrower. Before, a table kept the column widths it was first shown with. A column
+  you resize by hand keeps its width, and the widest column (a job's or task's name, or a
+  snapshot's tags) takes up the rest.
+
 ## [0.3.0] - 2026-11-12
 
 The window gets a menu bar, a status bar and a compact new look, and the SQLite built into

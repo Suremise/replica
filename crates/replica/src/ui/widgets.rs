@@ -1107,6 +1107,14 @@ impl TableState {
     }
 }
 
+/// What a [`table`] keeps of its columns between frames: the widths the user dragged them to
+/// (`None` for one they haven't), and each column's left and right edge as last drawn.
+#[derive(Debug, Clone, Default)]
+struct ColumnWidths {
+    hand: Vec<Option<f32>>,
+    edges: Vec<(f32, f32)>,
+}
+
 /// What happened in a [`table`] this frame.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TableResponse {
@@ -1199,6 +1207,57 @@ pub fn table(
         .max(space::TABLE_ROW_MIN_HEIGHT)
         .ceil();
     let mut tallest = tallest_seen;
+
+    // The columns' widths are laid out afresh each frame from the caller's (or the user's, for
+    // a column resized by hand), so the flexible column always takes what the others leave:
+    // `egui_extras` keeps a resizable column at its first width, so a table first shown in a
+    // narrow window stayed that wide when the window grew. Its own memory of the widths is
+    // dropped (`reset`, below), and a drag on a column's line is read here instead.
+    let n = columns.len();
+    let flex = columns
+        .iter()
+        .position(|c| c.width.is_none())
+        .unwrap_or(n.saturating_sub(1));
+    let least = |i: usize| {
+        let c = &columns[i];
+        match c.width {
+            Some(w) if i == flex => c.least.unwrap_or(w.min(120.0)),
+            _ => c.least.unwrap_or(48.0),
+        }
+    };
+    let widths_id = id.with("widths");
+    let mut widths: ColumnWidths = ui.data(|d| d.get_temp(widths_id)).unwrap_or_default();
+    if widths.hand.len() != n {
+        widths = ColumnWidths {
+            hand: vec![None; n],
+            edges: Vec::new(),
+        };
+    }
+    // `egui_extras`' id for a column's line: the table's (its `id_salt`, an `IdSalt` of `id`),
+    // then the column's.
+    let resize_id = ui
+        .scope_id()
+        .with(egui::IdSalt::new(id))
+        .with("resize_column");
+    if widths.edges.len() == n
+        && let Some(x) = ui.ctx().pointer_latest_pos().map(|p| p.x)
+    {
+        for i in 0..n {
+            if !ui.ctx().is_being_dragged(resize_id.with(i)) {
+                continue;
+            }
+            // Left of the flexible column, a line is its column's right edge; from it on, the
+            // left edge of the column after it, which keeps its right edge (the flexible
+            // column gives or takes the difference).
+            if i < flex {
+                widths.hand[i] = Some((x - widths.edges[i].0).max(least(i)));
+            } else if i + 1 < n {
+                widths.hand[i + 1] = Some((widths.edges[i + 1].1 - x).max(least(i + 1)));
+            }
+        }
+    }
+    let mut edges = Vec::with_capacity(n);
+
     let mut builder = TableBuilder::new(ui)
         .id_salt(id)
         .striped(false)
@@ -1216,18 +1275,18 @@ pub fn table(
         builder = builder.scroll_to_row(s, None);
         state.scroll_to_selected = false;
     }
-    // Unless a column takes what's left, the last one does, so the table fills its width.
-    let flexible = columns.iter().any(|c| c.width.is_none());
+    // The flexible column (the one with no width, else the last) takes what's left, so the
+    // table fills its width at any size. The last column's line is the table's edge, which
+    // has nothing to its right to resize.
     for (i, c) in columns.iter().enumerate() {
-        let column = match c.width {
-            Some(w) if i + 1 == columns.len() && !flexible => {
-                Column::remainder().at_least(w.min(120.0))
-            }
-            Some(w) => Column::initial(w),
-            None => Column::remainder(),
+        let column = if i == flex {
+            Column::remainder()
+        } else {
+            Column::initial(widths.hand[i].or(c.width).unwrap_or(0.0))
         };
-        builder = builder.column(column.at_least(c.least.unwrap_or(48.0)).clip(true));
+        builder = builder.column(column.at_least(least(i)).resizable(i + 1 < n).clip(true));
     }
+    builder.reset();
 
     let mut selected_row_id = None;
     let output = builder
@@ -1237,6 +1296,7 @@ pub fn table(
                     // The header's tint, its rule, and a line at the right of each title but
                     // the last.
                     let cell = ui.max_rect();
+                    edges.push((cell.left(), cell.right()));
                     let painter = ui.painter();
                     painter.rect_filled(cell, 0.0, p.header);
                     painter.hline(
@@ -1414,6 +1474,13 @@ pub fn table(
         ui.ctx().request_discard("a table's rows got taller");
     }
     ui.data_mut(|d| d.insert_temp(rect_id, output.inner_rect));
+    // Moved or resized (the window was): another frame puts its keyboard stop, and what a
+    // screen reader is told of its bounds, where it now is.
+    if last != output.inner_rect {
+        ui.ctx().request_repaint();
+    }
+    widths.edges = edges;
+    ui.data_mut(|d| d.insert_temp(widths_id, widths));
     if focus.has_focus() {
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(

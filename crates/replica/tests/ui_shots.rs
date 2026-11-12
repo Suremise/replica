@@ -1,7 +1,8 @@
 //! The screenshot harness: renders named screens with `egui_kittest`'s wgpu renderer
 //! and writes PNGs to the git-ignored `target/ui-shots/<name>/`, for reviewing the window's
 //! look without running it. Each screen is shot in light and dark, at 100% and 150%, at a
-//! normal and a narrow width, the window's least (`geometry::MIN_SIZE`, 720 points):
+//! normal width, a narrow one, the window's least (`geometry::MIN_SIZE`, 720 points), and a
+//! wide one, a window maximised on a wide screen (2560 points):
 //! `<screen>-<theme>-<width>-<scale>.png`.
 //!
 //! It's ignored by a plain `cargo test`; run it with
@@ -57,19 +58,29 @@ use test_credentials::TestCredentials;
 struct Variant {
     theme: Theme,
     scale: f32,
-    narrow: bool,
+    width: Width,
+}
+
+/// The window's width in a [`Variant`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Width {
+    Normal,
+    /// The window's least.
+    Narrow,
+    /// Maximised on a wide screen.
+    Wide,
 }
 
 impl Variant {
     fn all() -> Vec<Variant> {
         let mut all = Vec::new();
         for theme in [Theme::Light, Theme::Dark] {
-            for narrow in [false, true] {
+            for width in [Width::Normal, Width::Narrow, Width::Wide] {
                 for scale in [1.0, 1.5] {
                     all.push(Variant {
                         theme,
                         scale,
-                        narrow,
+                        width,
                     });
                 }
             }
@@ -79,10 +90,10 @@ impl Variant {
 
     /// Narrow is the window's least width, so a narrow shot shows nothing is cut there.
     fn width(self) -> f32 {
-        if self.narrow {
-            replica::ui::geometry::MIN_SIZE[0]
-        } else {
-            1200.0
+        match self.width {
+            Width::Normal => 1200.0,
+            Width::Narrow => replica::ui::geometry::MIN_SIZE[0],
+            Width::Wide => WIDE,
         }
     }
 
@@ -93,7 +104,11 @@ impl Variant {
                 Theme::Light => "light",
                 Theme::Dark => "dark",
             },
-            if self.narrow { "narrow" } else { "normal" },
+            match self.width {
+                Width::Normal => "normal",
+                Width::Narrow => "narrow",
+                Width::Wide => "wide",
+            },
             (self.scale * 100.0) as u32
         )
     }
@@ -103,10 +118,15 @@ impl Variant {
         self.sized(self.width(), height)
     }
 
-    /// The window at its first-run size, or narrow.
+    /// The window at its first-run size, or narrow or wide.
     fn default_size<S>(self) -> HarnessBuilder<S> {
         let [width, height] = replica::ui::geometry::DEFAULT_SIZE;
-        self.sized(if self.narrow { self.width() } else { width }, height)
+        let width = if self.width == Width::Normal {
+            width
+        } else {
+            self.width()
+        };
+        self.sized(width, height)
     }
 
     fn sized<S>(self, width: f32, height: f32) -> HarnessBuilder<S> {
@@ -880,6 +900,9 @@ fn password_shot(v: Variant, path: &Path) {
 /// `egui_kittest`'s margin round a screen, in points.
 const MARGIN: f32 = 8.0;
 
+/// A window maximised on a wide screen.
+const WIDE: f32 = 2560.0;
+
 /// Lets `harness` settle (threads finish, layouts that need a second pass), then writes it,
 /// without the harness's margin.
 fn save<S>(harness: &mut Harness<'_, S>, scale: f32, path: &Path) {
@@ -1207,7 +1230,14 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
             let fixture = busy_fixture();
             let width = replica::ui::geometry::DEFAULT_SIZE[0];
             let mut harness = v
-                .sized(if v.narrow { v.width() } else { width }, 580.0)
+                .sized(
+                    if v.width == Width::Normal {
+                        width
+                    } else {
+                        v.width()
+                    },
+                    580.0,
+                )
                 .build_ui_state(
                     |ui, shell: &mut Shell| shell.show(ui),
                     fixture.shell(Tab::Jobs),
@@ -1741,6 +1771,177 @@ fn a_table_row_in_the_window_can_be_clicked() {
             .map(|s| s.short_id.as_str()),
         Some("4f2a91c0")
     );
+}
+
+/// The table named `table` (a list box) reaches its frame's right edge: its last column, titled
+/// `last` (`width` wide), ends at the table's right, not short of it with the rest empty.
+/// Returns the table's rect.
+fn assert_fills(
+    harness: &Harness<'_, Shell>,
+    table: &str,
+    last: &str,
+    width: f32,
+    when: &str,
+) -> eframe::egui::Rect {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let rect = harness
+        .get_all_by_role(Role::ListBox)
+        .find(|n| n.accesskit_node().label().as_deref() == Some(table))
+        .unwrap_or_else(|| panic!("{when}: the table {table}"))
+        .rect();
+    // The last column's title, in the header just above the table's rows.
+    let title = harness
+        .get_all_by_label(last)
+        .map(|n| n.rect())
+        .filter(|r| r.bottom() <= rect.top() + 1.0 && r.bottom() > rect.top() - 60.0)
+        .min_by(|a, b| (rect.top() - a.bottom()).total_cmp(&(rect.top() - b.bottom())))
+        .unwrap_or_else(|| panic!("{when}: {table}'s last title {last}"));
+    let gap = rect.right() - title.right();
+    assert!(
+        (0.0..width).contains(&gap),
+        "{when}: {table}'s last column, {last} at {title:?}, ends {gap} short of its right \
+         edge, {rect:?}"
+    );
+    rect
+}
+
+/// Each table fills its frame at the window's least width, when the window then grows to a
+/// wide screen's (as when it's maximised), and when it shrinks back. Before, a table kept the
+/// column widths it was first shown with, so a maximised window's had half its frame empty.
+#[test]
+fn every_table_fills_its_width_as_the_window_grows_and_shrinks() {
+    let narrow = replica::ui::geometry::MIN_SIZE[0];
+    let docs = || task("Documents", "daily 02:30", true, Some(0));
+    let photos = || task("Photos", "every 6h", false, Some(2));
+    // Each page with a table: its name, its last column's title and that column's width.
+    let cases: Vec<(Fixture, Tab, &str, &str, f32)> = vec![
+        (Fixture::new(), Tab::Jobs, "Jobs", "Actions", 96.0),
+        (
+            Fixture::with_data(Faked::with_history),
+            Tab::History,
+            "History",
+            "Sort by Size",
+            84.0,
+        ),
+        (
+            Fixture::with_data(Faked::with_snapshots),
+            Tab::Restore,
+            "Snapshot",
+            "ID",
+            84.0,
+        ),
+        (
+            Fixture::with(ScheduleMode::TaskScheduler, vec![docs(), photos()]),
+            Tab::Settings,
+            "Scheduled tasks",
+            "Actions",
+            64.0,
+        ),
+    ];
+    for (fixture, tab, table, last, width) in &cases {
+        let mut shell = fixture.shell(*tab);
+        shell.restore.job = Some("Documents".into());
+        let mut harness = Harness::builder()
+            .with_size([narrow, 2100.0])
+            .with_max_steps(64)
+            .with_context_setup(|ctx| {
+                replica::ui::fonts::install(ctx).unwrap();
+                replica::ui::style(ctx);
+            })
+            .build_ui_state(|ui, shell: &mut Shell| shell.show(ui), shell);
+        if *tab == Tab::Restore {
+            restore_steps(&mut harness, 1);
+        }
+        let _ = harness.try_run();
+        let first = assert_fills(&harness, table, last, *width, "narrow");
+
+        harness.set_size(eframe::egui::vec2(WIDE, 2100.0));
+        let _ = harness.try_run();
+        let wide = assert_fills(&harness, table, last, *width, "grown wide");
+        // Out to the page's right margin, as the cards round it are.
+        assert!(
+            wide.right() > WIDE - 60.0,
+            "{table} grew with the window: {first:?}, then {wide:?}"
+        );
+
+        harness.set_size(eframe::egui::vec2(narrow, 2100.0));
+        let _ = harness.try_run();
+        let again = assert_fills(&harness, table, last, *width, "narrow again");
+        assert!(
+            (again.width() - first.width()).abs() < 1.0,
+            "{table} is as wide as at first: {first:?}, then {again:?}"
+        );
+    }
+}
+
+/// A column dragged wider by hand keeps its width as the window grows, and the table still
+/// fills its frame: Tags, which takes what's left, gives up the room.
+#[test]
+fn a_column_resized_by_hand_keeps_its_width_and_the_table_still_fills() {
+    use eframe::egui::{Event, PointerButton, pos2};
+    use egui_kittest::kittest::Queryable;
+    let fixture = Fixture::with_data(Faked::with_snapshots);
+    let mut shell = fixture.shell(Tab::Restore);
+    shell.restore.job = Some("Documents".into());
+    let mut harness = Harness::builder()
+        .with_size([1200.0, 1500.0])
+        .with_max_steps(64)
+        .with_context_setup(|ctx| {
+            replica::ui::fonts::install(ctx).unwrap();
+            replica::ui::style(ctx);
+        })
+        .build_ui_state(|ui, shell: &mut Shell| shell.show(ui), shell);
+    restore_steps(&mut harness, 1);
+    let _ = harness.try_run();
+    // Pinned's title is padded from its cell's left edge, the line between it and Date.
+    let pinned = |h: &Harness<'_, Shell>| h.get_by_label("Pinned").rect().left();
+    let table = |h: &Harness<'_, Shell>| {
+        assert_fills(h, "Snapshot", "ID", 84.0, "after the drag");
+    };
+    let before = pinned(&harness);
+    let line = before - replica::ui::theme::space::S;
+    let y = harness.get_by_label("Pinned").rect().center().y;
+
+    // Date's right edge dragged 60 points right, with the harness's own pointer.
+    harness.event(Event::PointerMoved(pos2(line, y)));
+    harness.step();
+    harness.event(Event::PointerButton {
+        pos: pos2(line, y),
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    });
+    harness.step();
+    for dx in [10.0, 30.0, 60.0] {
+        harness.event(Event::PointerMoved(pos2(line + dx, y)));
+        harness.step();
+    }
+    harness.event(Event::PointerButton {
+        pos: pos2(line + 60.0, y),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
+    let _ = harness.try_run();
+    let dragged = pinned(&harness);
+    assert!(
+        (dragged - before - 60.0).abs() < 2.0,
+        "Date is 60 points wider: Pinned from {before} to {dragged}"
+    );
+    table(&harness);
+
+    // Wider, Date keeps the width it was given.
+    let left = |h: &Harness<'_, Shell>| h.get_by_label("Date").rect().left();
+    let offset = dragged - left(&harness);
+    harness.set_size(eframe::egui::vec2(WIDE, 1500.0));
+    let _ = harness.try_run();
+    let wide = pinned(&harness) - left(&harness);
+    assert!(
+        (wide - offset).abs() < 1.0,
+        "Date kept its width: Pinned {offset} from Date's title, then {wide}"
+    );
+    table(&harness);
 }
 
 // --- Restore's choices, as they change -----------------------------------------------------
