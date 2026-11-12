@@ -10,7 +10,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/jobs-dark.png">
-  <img src="docs/screenshots/jobs-light.png" alt="Replica's Jobs page: six backup jobs with their status (OK, running at 42%, failed, skipped, never run and waiting its turn), last and next run, targets and actions">
+  <img src="docs/screenshots/jobs-light.png" alt="Replica's window on its Jobs page: a menu bar (File, Jobs, View, Tools, Help), a sidebar of Jobs, History and Restore, and a table of six backup jobs with their status (OK, running at 42%, failed, skipped, never run and waiting its turn), last and next run, schedule, targets and actions; along the bottom, a status bar with the running job's progress, the next run, 1 failed and 1 skipped, and the built-in timer">
 </picture>
 
 Replica backs up your folders to an external drive or a NAS share on a schedule. Each backup is a
@@ -51,7 +51,8 @@ files (30% by default), as when a source was emptied by mistake.
 
 1. **Install Replica** (see [Installing](#installing)), or build it from source (see
    [Building from source](#building-from-source)).
-2. **Set up a job** in the window (**Jobs > Add job**, from the tray icon), or in `settings.toml`,
+2. **Set up a job** in the window (open it from the tray icon, then **New job**, or **File > New
+   job…**), or in `settings.toml`,
    in `%APPDATA%\Replica\` (or beside the exe for a portable copy). [docs/settings.example.toml](docs/settings.example.toml) documents every key; the
    [job model](#jobs) below shows the short version.
 3. **Set up its target.** The window does this when you save the job. For a job set up in the

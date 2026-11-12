@@ -283,7 +283,7 @@ Restoring never touches your files unless you ask it to: by default it goes to a
 
 ### From the window
 
-**Restore** tab:
+The **Restore** page (in the sidebar, or Ctrl+3):
 
 1. Pick the **job** and, if it has several, the **backup** (target). Its snapshots are listed,
    newest first.
@@ -314,7 +314,7 @@ A **mirror** target has no snapshots: it's a plain copy, so copy files back from
 A backup you've never restored from is a backup you hope works. Once a month, and after any
 change to a job:
 
-1. **Restore tab > Test restore**, for each versioned job and each of its targets. Replica restores
+1. **Restore > Test restore** in the window, for each versioned job and each of its targets. Replica restores
    a few random files from the latest snapshot to a temporary folder and compares them, byte for
    byte, with the originals. It says how many were compared and that they're the same, or names
    any that differ. History keeps every test restore. (Files that changed since the backup aren't
@@ -462,7 +462,8 @@ settings and history travel with it. If its folder can't be written to (a read-o
 folder), Replica says so and saves nothing anywhere else.
 
 Share logins and repository passwords are always in Windows Credential Manager, in both cases.
-**Settings > Where Replica keeps its files** shows the exact folders, with buttons to open them.
+**Settings > Storage** (**Tools > Settings…**) shows the exact folders, under **Where Replica
+keeps its files**, with buttons to open them; **File > Open settings folder** opens Replica's.
 
 Uninstalling the MSI (Settings > Apps) removes the program, Replica's scheduled tasks and its Start
 with Windows entry. It **never** removes your settings, history, logs or backups.
@@ -472,7 +473,8 @@ with Windows entry. It **never** removes your settings, history, logs or backups
 **Where to look first.** **History** in the window shows every run, each target's result and why,
 and **Open the log** for that run. The logs are in `logs\runs\` (one per run) and `logs\` (one per
 start of the tray or the command line) in Replica's folder (see above); **File > Open log folder**
-(or **Settings > Open the logs folder**) opens them. `replica status` shows every job's last result and what's running.
+(or **Open the logs folder** in **Settings > Storage**) opens them. `replica status` shows every
+job's last result and what's running, as the window's status bar does.
 
 **"The target isn't available" (skipped).** The drive isn't plugged in, or the NAS is off or out
 of reach. Plug it in or switch it on, and run the job again, or wait for the next scheduled run.
