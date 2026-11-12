@@ -19,6 +19,12 @@ All notable changes to Replica are recorded here. The format is based on
   while a job runs, and paths, targets, snapshot IDs and sizes in monospace. A job's schedule has
   a column of its own, with what runs it (the built-in timer or Task Scheduler) on hover.
 
+### Security
+
+- The SQLite built into Replica is updated to 3.54.1 (rusqlite 0.41.1), for a security fix:
+  older versions could return uninitialised memory when opening a database whose `-wal` file
+  had been crafted with a different page size (RUSTSEC-2026-0459, CVE-2026-119375).
+
 ## [0.2.0] - 2026-11-02
 
 Mirror runs now list every file/folder clash with what to do, and the tray icon's tooltip always shows.
