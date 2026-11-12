@@ -892,8 +892,8 @@ own constants (`shell.rs`, `menu.rs`, `status_bar.rs`), so the pages' look (`the
   when the file's time changes, checked once a second), whichever page shows: the status bar,
   the menus' state and Run all use these, not the Jobs page's copy, which it refreshes only while
   it shows.
-- **A compact sidebar** of the pages (`Tab::SIDEBAR`): Jobs, History, Restore and Schedules,
-  then Settings apart at the sidebar's foot, as a Windows app's navigation has it, each a module
+- **A compact sidebar** of the pages (`Tab::SIDEBAR`), from its top (no logo: the title bar has
+  the app's icon and name): Jobs, History, Restore and Schedules, then Settings apart at the sidebar's foot, as a Windows app's navigation has it, each a module
   shown by `Shell::tab`, with an icon from `ui/icons.rs`. View lists the same five. About is a
   page too, reached from the Help menu, so no sidebar item is marked while it shows. The page
   shown has the accent's bar and a subtle fill. A screen reader reads the
@@ -920,7 +920,13 @@ own constants (`shell.rs`, `menu.rs`, `status_bar.rs`), so the pages' look (`the
   (never under the 720 × 480 minimum), centred on the work area of the monitor the pointer is
   on (`replica_win::window::work_area`; `geometry::first_rect` does the sums, and its tests
   cover a small work area).
-- The title bar and taskbar use `assets/icon/replica.ico` (`replica_win::window::set_icons`).
+- The title bar, taskbar button and Alt+Tab use `assets/icon/replica.ico`
+  (`replica_win::window::set_icons`, at the sizes Windows wants for the window's DPI, made again
+  when the DPI changes: `Shell::icons_follow_the_dpi`). eframe is given an empty icon
+  (`ui::viewport`): given none, it uses egui's and sets it over Replica's after the first frame.
+  `replica_win::window::shows_icons_from` reads a window's icons back (`WM_GETICON`) and compares
+  them with the file's: a unit test on a never-shown window, and the real tray's test
+  (`tests/tray.rs`, run on purpose) when the window opens and after it comes back from the tray.
 - Text is Segoe UI Variable (Windows 11), then Segoe UI, loaded from `%WINDIR%\Fonts` at run
   time (`ui/fonts.rs`): no font ships. Semibold is a family of its own (`fonts::SEMIBOLD`): the
   variable font at `wght` 600, or Segoe UI Semibold. Monospace is Cascadia Mono, then Consolas.

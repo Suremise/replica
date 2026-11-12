@@ -14,9 +14,12 @@ All notable changes to Replica are recorded here. The format is based on
 - Replica's tasks in Task Scheduler have a page of their own, **Schedules**, rather than a section
   of Settings. Settings' tab for what runs the schedules and pausing them is now **Scheduling**,
   and links to the page.
+- The sidebar no longer repeats Replica's logo and name at its top: the title bar has them.
 
 ### Fixed
 
+- The window's title bar, taskbar button and Alt+Tab show Replica's icon rather than egui's
+  default one, and keep it at every display scale.
 - Tables (Jobs, History, Restore's snapshots and Schedules' tasks) fill the window's width
   when it's maximised or made wider, as the rest of the page does, and fit again when it's
   made narrower. Before, a table kept the column widths it was first shown with. A column

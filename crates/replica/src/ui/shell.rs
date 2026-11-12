@@ -22,7 +22,7 @@ use eframe::egui::{
 use replica_core::i18n::tr;
 use replica_core::settings::Settings;
 use replica_core::tr;
-use replica_win::window::WindowIcons;
+use replica_win::window::{WindowIcons, set_icons};
 
 use super::Shared;
 use super::about::{AboutTab, PROJECT_URL};
@@ -120,11 +120,10 @@ const SIDEBAR_RAIL: f32 = 44.0;
 const NARROW: f32 = 1000.0;
 const RAIL: f32 = 880.0;
 
-/// The sidebar's rows, the gap between them, its app icon and its text, in points.
+/// The sidebar's rows, the gap between them, its icons and its text, in points.
 const NAV_ITEM_HEIGHT: f32 = 32.0;
 const NAV_ITEM_GAP: f32 = 2.0;
 const NAV_ICON_SIZE: f32 = 16.0;
-const APP_ICON_SIZE: f32 = 16.0;
 const NAV_TEXT_SIZE: f32 = 13.0;
 
 /// The room round the page, slimmer than the pages' own spacing: the frame is dense, as a
@@ -165,7 +164,10 @@ pub struct Shell {
     hidden: bool,
     /// Shown from the tray and not yet seen restored (see [`Shell::logic`]).
     restoring: bool,
-    _icons: Option<WindowIcons>,
+    /// The window's icons, kept while it shows them, and the scale they were made for: made
+    /// again at the sizes Windows wants when the window moves to a monitor with another DPI.
+    icons: Option<WindowIcons>,
+    icons_scale: Option<f32>,
 }
 
 impl Shell {
@@ -198,7 +200,8 @@ impl Shell {
             moved_at: None,
             hidden: false,
             restoring: false,
-            _icons: icons,
+            icons,
+            icons_scale: None,
             backend,
         };
         shell.load();
@@ -306,14 +309,13 @@ impl Shell {
         theme::paint_focus(&ctx);
     }
 
-    /// The app's icon and name, then a row for each page in [`Tab::SIDEBAR`], the one shown
+    /// A row for each page in [`Tab::SIDEBAR`], from the top (the title bar has the app's icon
+    /// and name), the one shown
     /// marked by the accent's bar: Settings apart from the others, at the sidebar's foot, as a
     /// Windows app's navigation has it. As a `rail`, only the icons, with each page's name in
     /// its hover text. A screen reader reads it as a tab list, with the pages' names either way.
     fn sidebar(&mut self, ui: &mut Ui, rail: bool) {
         let p = theme::of(ui);
-        let (header, _) =
-            ui.allocate_exact_size(vec2(ui.available_width(), NAV_ITEM_HEIGHT), Sense::hover());
         let icon_x = |rect: egui::Rect| {
             if rail {
                 rect.center().x
@@ -321,27 +323,6 @@ impl Shell {
                 rect.left() + space::S + NAV_ICON_SIZE / 2.0
             }
         };
-        let icon = egui::Rect::from_center_size(
-            egui::pos2(icon_x(header), header.center().y),
-            vec2(APP_ICON_SIZE, APP_ICON_SIZE),
-        );
-        let texture = super::app_icon(ui.ctx(), APP_ICON_SIZE);
-        ui.painter().image(
-            texture,
-            icon,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            Color32::WHITE,
-        );
-        if !rail {
-            ui.painter().text(
-                egui::pos2(icon.right() + space::S, header.center().y),
-                egui::Align2::LEFT_CENTER,
-                tr("app-name"),
-                theme::semibold(NAV_TEXT_SIZE),
-                p.text,
-            );
-        }
-        ui.add_space(space::S);
         let id = ui.scope_id().with("pages");
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::TabList);
@@ -725,6 +706,22 @@ impl Shell {
             self.send_to_tray(ctx);
         }
         self.track(ctx);
+        self.icons_follow_the_dpi(ctx);
+    }
+
+    /// Makes the window's icons again at the sizes Windows wants for its monitor's DPI, when
+    /// that changes (the first frame only notes it: the icons were just made).
+    fn icons_follow_the_dpi(&mut self, ctx: &egui::Context) {
+        let scale = ctx.pixels_per_point();
+        let was = self.icons_scale.replace(scale);
+        let hwnd = self.shared.hwnd.load(Ordering::SeqCst);
+        if was.is_none_or(|was| was == scale) || hwnd == 0 || self.icons.is_none() {
+            return;
+        }
+        match set_icons(hwnd, super::APP_ICON) {
+            Ok(icons) => self.icons = Some(icons),
+            Err(error) => tracing::warn!(%error, "couldn't set the window's icon for its new DPI"),
+        }
     }
 }
 

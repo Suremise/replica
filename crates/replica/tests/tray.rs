@@ -356,9 +356,10 @@ fn until<T>(secs: u64, what: &str, mut done: impl FnMut() -> Option<T>) -> T {
 }
 
 /// The real tray, `replica-tray --show` from a portable copy with a test's own name: its
-/// window opens; its tasks and Start with Windows entry are its own (never `\Replica` or the
-/// Run key); closing the window sends it to the tray; Open (a second launch, as the menu's
-/// Open does) brings it back; `--quit` ends it; and the log follows each step.
+/// window opens with Replica's icons; its tasks and Start with Windows entry are its own (never
+/// `\Replica` or the Run key); closing the window sends it to the tray; Open (a second launch,
+/// as the menu's Open does) brings it back, its icons still Replica's; `--quit` ends it; and the
+/// log follows each step.
 ///
 /// Ignored in the suite: it opens a real window and tray icon on the desktop. Run it with
 /// `cargo nextest run -p replica --test tray --run-ignored only`.
@@ -367,7 +368,7 @@ fn until<T>(secs: u64, what: &str, mut done: impl FnMut() -> Option<T>) -> T {
 fn the_real_tray_opens_hides_shows_and_quits_with_nothing_of_an_installed_one_touched() {
     use replica::tray::runner::TEST_TAG_VAR;
     use replica_win::autostart::{AutoStart, RUN_KEY, test_key};
-    use replica_win::window::{post_close, process_windows};
+    use replica_win::window::{post_close, process_windows, shows_icons_from};
 
     // Its name, `ReplicaTest-<pid>-<nanos>-tray`, is its Credential Manager prefix too: emptied
     // when the test ends, pass or fail.
@@ -408,6 +409,13 @@ fn the_real_tray_opens_hides_shows_and_quits_with_nothing_of_an_installed_one_to
             .find(|(_, title, shown)| title == "Replica" && *shown)
             .map(|(hwnd, _, _)| hwnd)
     });
+    // Its title bar, taskbar button and Alt+Tab show Replica's icons, read back from the
+    // window (WM_GETICON), not egui's.
+    until(30, "the window's icons to be Replica's", || {
+        shows_icons_from(hwnd, replica::ui::APP_ICON)
+            .unwrap()
+            .then_some(())
+    });
     // Whether that window shows, when it's `visible`.
     let window = |visible: bool| {
         process_windows(pid)
@@ -439,6 +447,12 @@ fn the_real_tray_opens_hides_shows_and_quits_with_nothing_of_an_installed_one_to
     );
     let shown = until(30, "Open to bring it back", || window(true));
     assert_eq!(shown, hwnd, "the same window");
+    // Still Replica's icons, long after eframe's first frames (which set egui's own over them
+    // when it was given none).
+    assert!(
+        shows_icons_from(hwnd, replica::ui::APP_ICON).unwrap(),
+        "Replica's icons after it's hidden and shown again"
+    );
 
     // Quit ends it.
     let quit = own.spawn(&mut tray(&["--quit"]));

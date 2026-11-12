@@ -43,8 +43,8 @@ use self::backend::Backend;
 use self::geometry::{DEFAULT_SIZE, MIN_SIZE, WindowState, first_rect};
 use self::shell::Shell;
 
-/// The app's icon, for the window's title bar and taskbar button.
-const APP_ICON: IconFile = IconFile(include_bytes!("../../../../assets/icon/replica.ico"));
+/// The app's icon, for the window's title bar, taskbar button and Alt+Tab.
+pub const APP_ICON: IconFile = IconFile(include_bytes!("../../../../assets/icon/replica.ico"));
 
 /// How long the window's thread has to take the tray's Open before the tray brings the
 /// window forward itself ([`Window::follow_up`]).
@@ -299,11 +299,7 @@ impl Window {
 /// Runs the window until the process ends.
 fn run(backend: Arc<dyn Backend>, shared: Arc<Shared>) -> Result<(), String> {
     let state = WindowState::load(&backend.window_state_file());
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_title(tr("app-name"))
-        .with_min_inner_size(MIN_SIZE)
-        .with_inner_size(DEFAULT_SIZE)
-        .with_visible(true);
+    let mut viewport = viewport();
     // Where it was; else, the first time, the default size (less on a small screen) in the
     // middle of the work area.
     let placed = state
@@ -375,6 +371,18 @@ fn run(backend: Arc<dyn Backend>, shared: Arc<Shared>) -> Result<(), String> {
             .take()
             .unwrap_or_else(|| tr!("window-start-failed", error = e.to_string()))
     })
+}
+
+/// The window as it's first made: its title and sizes, and **no icon from eframe**. Without one
+/// eframe uses egui's own and sets it on the window after the app is made, over Replica's
+/// ([`set_icons`], at the sizes Windows wants); an empty icon makes it set none.
+fn viewport() -> egui::ViewportBuilder {
+    egui::ViewportBuilder::default()
+        .with_title(tr("app-name"))
+        .with_icon(egui::IconData::default())
+        .with_min_inner_size(MIN_SIZE)
+        .with_inner_size(DEFAULT_SIZE)
+        .with_visible(true)
 }
 
 /// The app icon at the sizes `build.rs` decodes from `replica.ico`, as RGBA.
@@ -474,6 +482,14 @@ mod tests {
             }),
             pending: Mutex::new(Pending::Asked(asked)),
         }
+    }
+
+    #[test]
+    fn eframe_is_given_no_icon_of_its_own_to_set() {
+        let icon = viewport()
+            .icon
+            .expect("an icon, so eframe doesn't use egui's");
+        assert!(icon.is_empty(), "an empty one: eframe then sets none");
     }
 
     #[test]

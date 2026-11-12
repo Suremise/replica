@@ -33,6 +33,28 @@ pub fn set_icons(hwnd: isize, file: IconFile) -> io::Result<WindowIcons> {
     })
 }
 
+/// Whether the window `hwnd` (this process's or another's) shows icons from `file`: its big
+/// and small icons (`WM_GETICON`) each the same image as `file` makes at that icon's size. A
+/// window with no icon of its own, or another app's, doesn't.
+pub fn shows_icons_from(hwnd: isize, file: IconFile) -> io::Result<bool> {
+    let (big, small) = ui::window_icons(hwnd);
+    for handle in [big, small] {
+        if handle == 0 {
+            return Ok(false);
+        }
+        let (width, height, shown) = ui::icon_pixels(handle)?;
+        let (_, image) = file
+            .image_for(width)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "not an .ico file"))?;
+        let expected = Icon::from_ico_image(image, width as i32)?;
+        let (w, h, wanted) = ui::icon_pixels(expected.handle())?;
+        if (w, h) != (width, height) || wanted != shown {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Whether the window `hwnd` still exists.
 pub fn exists(hwnd: isize) -> bool {
     ui::window_exists(hwnd)

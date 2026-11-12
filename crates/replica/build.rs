@@ -3,7 +3,7 @@
 //! - THIRD-PARTY-NOTICES.txt (`scripts/third-party-notices.ps1`), embedded for the window's
 //!   About tab, or nothing when it hasn't been made: such a build then says where the notices are.
 //! - The app icon's 20, 32, 40, 48 and 64 px images as raw RGBA (`app-icon-<size>.rgba`), for the
-//!   window's sidebar and About page, so the window decodes nothing at start-up.
+//!   window's About page, so the window decodes nothing at start-up.
 //! - On Windows, a resource with the app's icon and a version naming Replica, so Explorer, the
 //!   taskbar and notifications show "Replica" rather than the exe's file name, the exes' Details
 //!   show the crate's version, and the installer can compare the files it replaces
@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-/// The icon's sizes the window draws, for 20 and 40 points at 100% to 200% (`ui::app_icon`).
+/// The icon's sizes the window draws (`ui::app_icon`): About's, 40 points at 100% and up.
 const SIDEBAR_ICON_SIZES: [u32; 5] = [20, 32, 40, 48, 64];
 
 fn main() {

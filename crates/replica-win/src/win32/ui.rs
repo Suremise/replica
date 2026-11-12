@@ -509,6 +509,101 @@ pub fn set_window_icons(hwnd: isize, big: &Icon, small: &Icon) {
     }
 }
 
+/// The window's big and small icons (`WM_GETICON`), as handles: 0 where it has none of its
+/// own. The window may be another process's; icons are shared across processes.
+pub fn window_icons(hwnd: isize) -> (isize, isize) {
+    use windows::Win32::UI::WindowsAndMessaging::WM_GETICON;
+    let get = |kind: u32| {
+        // SAFETY: a query; a stale handle answers 0.
+        unsafe {
+            SendMessageW(
+                HWND(hwnd as _),
+                WM_GETICON,
+                Some(WPARAM(kind as usize)),
+                Some(LPARAM(0)),
+            )
+        }
+        .0
+    };
+    (get(ICON_BIG), get(ICON_SMALL))
+}
+
+/// An icon's colour image: its width, height and 32-bit BGRA rows, top first.
+pub fn icon_pixels(icon: isize) -> io::Result<(u32, u32, Vec<u8>)> {
+    use windows::Win32::Graphics::Gdi::{
+        BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC,
+        GetDIBits, GetObjectW, HGDIOBJ, ReleaseDC,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, ICONINFO};
+    if icon == 0 {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "no icon"));
+    }
+    let mut info = ICONINFO::default();
+    // SAFETY: `info` is live; Windows fills it with two bitmaps we delete below.
+    unsafe { GetIconInfo(HICON(icon as _), &mut info) }.map_err(|e| io_error(&e))?;
+    // SAFETY: the bitmaps GetIconInfo made are ours, read and then deleted once each; the DC
+    // is the screen's, released after.
+    unsafe {
+        let mut bitmap = BITMAP::default();
+        let read = GetObjectW(
+            HGDIOBJ(info.hbmColor.0),
+            std::mem::size_of::<BITMAP>() as i32,
+            Some((&raw mut bitmap).cast()),
+        );
+        let result = if read == 0 || info.hbmColor.is_invalid() {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "no colour image",
+            ))
+        } else {
+            let (width, height) = (bitmap.bmWidth, bitmap.bmHeight);
+            let mut header = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: width,
+                    // Negative: top-down rows.
+                    biHeight: -height,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut rows = vec![0u8; (width * height * 4) as usize];
+            let dc = GetDC(None);
+            let lines = GetDIBits(
+                dc,
+                info.hbmColor,
+                0,
+                height as u32,
+                Some(rows.as_mut_ptr().cast()),
+                &mut header,
+                DIB_RGB_COLORS,
+            );
+            ReleaseDC(None, dc);
+            if lines == height {
+                Ok((width as u32, height as u32, rows))
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unreadable icon",
+                ))
+            }
+        };
+        let _ = DeleteObject(HGDIOBJ(info.hbmColor.0));
+        let _ = DeleteObject(HGDIOBJ(info.hbmMask.0));
+        result
+    }
+}
+
+impl Icon {
+    /// Its handle, to read it back ([`icon_pixels`]).
+    pub fn handle(&self) -> isize {
+        self.0.0 as isize
+    }
+}
+
 /// A window, by its `HWND`, as the owner of a dialog (such as a file dialog).
 pub struct DialogOwner(std::num::NonZeroIsize);
 
@@ -928,5 +1023,34 @@ mod tests {
 
         drop(icon);
         assert_eq!(sent()[0].0, NIM_DELETE);
+    }
+
+    #[test]
+    fn a_window_shows_the_icons_it_was_given_and_not_another_files() {
+        use crate::tray::IconFile;
+        use crate::window::{set_icons, shows_icons_from};
+        const APP: IconFile = IconFile(include_bytes!("../../../../assets/icon/replica.ico"));
+        const OTHER: IconFile =
+            IconFile(include_bytes!("../../../../assets/tray/idle-on-dark.ico"));
+
+        // Never shown or activated: nothing on the screen, nothing taken from the foreground.
+        let window = TestWindow::new(false, Then::Pump);
+        assert_eq!(window_icons(window.hwnd), (0, 0), "none of its own yet");
+        assert!(!shows_icons_from(window.hwnd, APP).unwrap());
+
+        let icons = set_icons(window.hwnd, APP).unwrap();
+        let (big, small) = window_icons(window.hwnd);
+        assert_ne!(big, 0);
+        assert_ne!(small, 0);
+        // Each at the size Windows wants for this window's DPI.
+        let width = |icon| icon_pixels(icon).unwrap().0 as i32;
+        assert_eq!(width(big), window_icon_size(window.hwnd, false));
+        assert_eq!(width(small), window_icon_size(window.hwnd, true));
+        assert!(shows_icons_from(window.hwnd, APP).unwrap());
+        assert!(
+            !shows_icons_from(window.hwnd, OTHER).unwrap(),
+            "another file's icons aren't these"
+        );
+        drop(icons);
     }
 }
