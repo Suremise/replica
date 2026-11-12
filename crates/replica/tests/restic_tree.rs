@@ -245,8 +245,27 @@ fn a_program_left_running_when_restic_exits_is_stopped_with_the_command() {
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("pid.txt");
     let _cleanup = KillOnDrop(pid_file.clone());
-    // It starts the program in the background, holding restic's output open, and exits.
-    let exe = fake_restic(dir.path(), &pid_file, "start /B {program}\r\nexit /b 0");
+    // It starts the program in the background, holding restic's output open, and exits once
+    // the program has written its PID: so the program is certainly running in the job when
+    // restic exits, however slowly it starts under load. (Exiting straight away, a PowerShell
+    // that took longer than the command's grace after restic exits to start was stopped
+    // before it wrote its PID, and the test waited out its bound for a file that never came.)
+    // The wait is for the file, about a second a look, at most 2 minutes: past that, restic
+    // exits anyway, and `read_pid` says the program didn't start.
+    let wait = format!(
+        concat!(
+            "start /B {{program}}\r\n",
+            "set n=0\r\n",
+            ":started\r\n",
+            "if exist \"{file}\" for %%A in (\"{file}\") do if %%~zA GTR 0 exit /b 0\r\n",
+            "set /a n+=1\r\n",
+            "if %n% GEQ 120 exit /b 0\r\n",
+            "ping -n 2 127.0.0.1 >nul\r\n",
+            "goto started"
+        ),
+        file = pid_file.display()
+    );
+    let exe = fake_restic(dir.path(), &pid_file, &wait);
     let tree = Arc::new(Recording::default());
     let restic = Restic::new(&exe).unwrap().with_tree(tree.clone());
     let start = Instant::now();
