@@ -473,4 +473,208 @@ mod tests {
         assert_eq!(old.skipped(), None);
         assert_eq!(old.outcome, Outcome::Partly);
     }
+
+    /// Each released version's history, as that release wrote it (`fixtures/releases`; a
+    /// release adds its own): two runs, a test restore and a verify. 0.1.0's mirror had no
+    /// clashes column yet.
+    #[test]
+    fn every_released_history_opens_with_every_row_kept() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/releases");
+        for (version, has_clashes) in [("0.1.0", false), ("0.2.0", true), ("0.3.0", true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("history.db");
+            std::fs::copy(fixtures.join(version).join("history.db"), &path).unwrap();
+            let history = History::open(&path).unwrap_or_else(|e| panic!("{version}: {e}"));
+            assert_eq!(history.version().unwrap(), MIGRATIONS.len(), "{version}");
+            let t0 = parse_time("2026-10-20T01:30:00+00:00");
+
+            let runs = history.recent(None, 10).unwrap();
+            assert_eq!(runs.len(), 2, "{version}");
+            let failed = &runs[0];
+            assert_eq!(
+                (failed.job.as_str(), failed.outcome, failed.exit_code),
+                ("photos-mirror", Outcome::Failed, 1),
+                "{version}"
+            );
+            assert_eq!(failed.started_at, t0 + chrono::Duration::hours(1));
+            assert_eq!(failed.duration, Duration::from_millis(1500));
+            assert_eq!(failed.error.as_deref(), Some("The before step failed."));
+            assert_eq!(failed.targets, []);
+
+            let run = &runs[1];
+            assert_eq!(
+                (run.job.as_str(), run.outcome, run.exit_code),
+                ("hive", Outcome::Partly, 2),
+                "{version}"
+            );
+            assert_eq!(run.started_at, t0);
+            assert_eq!(run.duration, Duration::from_millis(83_250));
+            assert_eq!((run.files, run.bytes), (1244, 5_680_949), "{version}");
+            assert_eq!(run.error, None);
+            assert_eq!(
+                run.log_path.as_deref(),
+                Some(Path::new(
+                    r"C:\Users\Alex\AppData\Roaming\Replica\logs\hive.log"
+                ))
+            );
+            assert_eq!(run.skipped(), Some(2), "{version}");
+            let mirror = &run.targets[1];
+            assert_eq!(
+                run.targets[0],
+                TargetRecord {
+                    target: "External HDD".into(),
+                    mode: "versioned".into(),
+                    outcome: Outcome::Ok,
+                    files: 1234,
+                    bytes: 5_678_901,
+                    reason: None,
+                    snapshot_id: Some("4f2a9c1e".into()),
+                    skipped: Some(0),
+                    clashes: vec![],
+                },
+                "{version}"
+            );
+            assert_eq!(
+                TargetRecord {
+                    clashes: vec![],
+                    ..mirror.clone()
+                },
+                TargetRecord {
+                    target: r"\\nas\backup\photos".into(),
+                    mode: "mirror".into(),
+                    outcome: Outcome::Partly,
+                    files: 10,
+                    bytes: 2048,
+                    reason: Some("2 files couldn't be copied.".into()),
+                    snapshot_id: None,
+                    skipped: Some(2),
+                    clashes: vec![],
+                },
+                "{version}"
+            );
+            if has_clashes {
+                assert_eq!(mirror.clashes.len(), 1, "{version}");
+                assert!(
+                    mirror.clashes[0].contains(r"E:\Mirror\2024"),
+                    "{version}: {:?}",
+                    mirror.clashes
+                );
+            } else {
+                assert_eq!(mirror.clashes, [] as [String; 0], "{version}");
+            }
+
+            let filter = HistoryFilter::default();
+            assert_eq!(
+                history.test_restores(&filter, 10).unwrap(),
+                [TestRestoreRecord {
+                    id: 1,
+                    job: "hive".into(),
+                    target: "External HDD".into(),
+                    snapshot_id: Some("4f2a9c1e".into()),
+                    started_at: t0 + chrono::Duration::hours(2),
+                    duration: Duration::from_millis(4200),
+                    outcome: Outcome::Ok,
+                    checked: 20,
+                    differing: 0,
+                    detail: None,
+                }],
+                "{version}"
+            );
+            assert_eq!(
+                history.last_verify("hive", "External HDD").unwrap(),
+                Some(t0 + chrono::Duration::hours(3)),
+                "{version}"
+            );
+            assert_eq!(history.last_success("hive").unwrap(), Some(t0), "{version}");
+            assert_eq!(history.job_names().unwrap(), ["hive", "photos-mirror"]);
+        }
+    }
+
+    /// Writes this version's `history.db` into `fixtures/releases/<version>`, with the rows
+    /// [`every_released_history_opens_with_every_row_kept`] checks (docs/RELEASING.md);
+    /// ignored, so test runs leave the committed files alone.
+    #[test]
+    #[ignore = "writes this version's release fixtures (docs/RELEASING.md)"]
+    fn write_release_fixtures() {
+        use crate::mirror::{ClashKind, MirrorClash};
+        let out = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/releases")
+            .join(env!("CARGO_PKG_VERSION"));
+        std::fs::create_dir_all(&out).unwrap();
+        let path = out.join("history.db");
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => panic!("{e}"),
+            _ => {}
+        }
+        let mut history = History::open(&path).unwrap();
+        let t0 = parse_time("2026-10-20T01:30:00+00:00");
+        let report = RunReport {
+            id: None,
+            job: "hive".into(),
+            started_at: t0,
+            duration: Duration::from_millis(83_250),
+            outcome: Outcome::Partly,
+            error: None,
+            targets: vec![
+                TargetReport {
+                    target: "External HDD".into(),
+                    mode: "versioned",
+                    outcome: Outcome::Ok,
+                    reason: None,
+                    files: 1234,
+                    bytes: 5_678_901,
+                    snapshot_id: Some("4f2a9c1e".into()),
+                    problems: vec![],
+                    clashes: vec![],
+                },
+                TargetReport {
+                    target: r"\\nas\backup\photos".into(),
+                    mode: "mirror",
+                    outcome: Outcome::Partly,
+                    reason: Some("2 files couldn't be copied.".into()),
+                    files: 10,
+                    bytes: 2048,
+                    snapshot_id: None,
+                    problems: vec![r"D:\Photos\locked.jpg".into(), r"D:\Photos\2024".into()],
+                    clashes: vec![MirrorClash {
+                        path: r"\\?\E:\Mirror\2024".into(),
+                        in_mirror: ClashKind::Folder,
+                    }],
+                },
+            ],
+            log_path: Some(r"C:\Users\Alex\AppData\Roaming\Replica\logs\hive.log".into()),
+            waits: vec![],
+            gave_way: false,
+        };
+        history.record(&report).unwrap();
+        history
+            .record(&RunReport {
+                job: "photos-mirror".into(),
+                started_at: t0 + chrono::Duration::hours(1),
+                duration: Duration::from_millis(1500),
+                outcome: Outcome::Failed,
+                error: Some("The before step failed.".into()),
+                targets: vec![],
+                log_path: None,
+                ..report
+            })
+            .unwrap();
+        history
+            .record_test_restore(&TestRestoreRecord {
+                id: 0,
+                job: "hive".into(),
+                target: "External HDD".into(),
+                snapshot_id: Some("4f2a9c1e".into()),
+                started_at: t0 + chrono::Duration::hours(2),
+                duration: Duration::from_millis(4200),
+                outcome: Outcome::Ok,
+                checked: 20,
+                differing: 0,
+                detail: None,
+            })
+            .unwrap();
+        history
+            .record_verify("hive", "External HDD", t0 + chrono::Duration::hours(3))
+            .unwrap();
+    }
 }

@@ -2762,7 +2762,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "replica"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "clap",
@@ -2786,7 +2786,7 @@ dependencies = [
 
 [[package]]
 name = "replica-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "fluent-bundle",
@@ -2804,7 +2804,7 @@ dependencies = [
 
 [[package]]
 name = "replica-win"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "raw-window-handle",

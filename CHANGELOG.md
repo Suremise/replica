@@ -6,14 +6,29 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-12
+
+The window gets a menu bar, a status bar and a compact new look, and the SQLite built into
+Replica gets a security update.
+
+**Not signed yet:** Windows SmartScreen may warn the first time you run the installer or the
+exes ("Windows protected your PC"). Check the download against the release's `SHA256SUMS.txt`
+first (`sha256sum -c SHA256SUMS.txt --ignore-missing`, or compare `Get-FileHash <file>` with
+it), and if it matches, choose **More info**, then **Run anyway**.
+
+Installing it over 0.2.0 keeps your settings, jobs, history and saved passwords.
+
+**If you've used Replica before:** Settings is now in the **Tools** menu (or Ctrl+,) and About
+in the **Help** menu, rather than alongside Jobs, History and Restore.
+
 ### Changed
 
 - The window has a menu bar (File, Jobs, View, Tools, Help) with keyboard shortcuts (Ctrl+N for
-  a new job, Ctrl+1/2/3 for the pages, Ctrl+, for Settings), a status bar showing what's running,
-  the next scheduled run, jobs with problems and what runs the schedules (View > Status bar hides
-  it; `show_status_bar` in `settings.toml` remembers that), and a compact sidebar with Jobs,
-  History and Restore. Settings and About are now in the Tools and Help menus. File > Exit Replica
-  quits Replica as the tray's Quit does.
+  a new job, Ctrl+1/2/3 for the pages, Ctrl+, for Settings), and a compact sidebar with Jobs,
+  History and Restore. File > Exit Replica quits Replica as the tray's Quit does.
+- A status bar along the bottom of the window shows what's running, the next scheduled run, jobs
+  with problems and what runs the schedules. View > Status bar hides it, and Replica remembers
+  that (`show_status_bar` in `settings.toml`).
 - The window's pages have a compact, quieter look: smaller type, denser tables with a tinted
   header and hairlines between rows, flat command buttons, squarer status chips with a slim bar
   while a job runs, and paths, targets, snapshot IDs and sizes in monospace. A job's schedule has

@@ -1,0 +1,2 @@
+# Release fixtures are SQLite databases and must stay byte for byte.
+*.db binary

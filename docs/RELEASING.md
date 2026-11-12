@@ -26,6 +26,13 @@ about both (see the checklist).
      Commit `THIRD-PARTY-NOTICES.txt` if it changed. The release fails if it's out of date.
 2. **Set the version** in `Cargo.toml` (`[workspace.package] version`), and run `cargo check` so
    `Cargo.lock` follows.
+   - **Add the release's fixtures:** every released version's `settings.toml`, exported jobs and
+     history are kept in `crates/replica-core/fixtures/releases/<version>/`, and tests load each
+     one and check every value is kept, so an upgrade never loses a user's data.
+     `cargo test -p replica-core --lib write_release_fixtures -- --ignored` writes this
+     version's; then add it to `RELEASED` in `settings.rs` and to the versions in
+     `history.rs`'s `every_released_history_opens_with_every_row_kept`. Never regenerate an
+     earlier release's: they're what that release wrote.
 3. **The changelog:** rename `## [Unreleased]` in `CHANGELOG.md` to `## [<version>] - <date>`,
    and start a new, empty `## [Unreleased]` above it. The release notes are that section.
 4. **Build locally and check** (optional, but it's what the workflow does):

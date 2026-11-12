@@ -1,4 +1,4 @@
-THIRD-PARTY NOTICES FOR REPLICA 0.2.0
+THIRD-PARTY NOTICES FOR REPLICA 0.3.0
 
 Replica is under the MIT licence (LICENSE, beside this file). It is built from the
 third-party Rust crates in part 1, compiles in SQLite and links in Microsoft's C runtime,

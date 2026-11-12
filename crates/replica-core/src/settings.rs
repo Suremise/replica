@@ -1380,4 +1380,83 @@ mod tests {
             loaded.settings
         );
     }
+
+    /// Each released version's `settings.toml` and exported jobs, as that release wrote them
+    /// from [`full`] (`fixtures/releases`; a release adds its own): their status bar setting,
+    /// which 0.3.0 added and writes as `false`.
+    const RELEASED: [(&str, &str, &str, bool); 3] = [
+        (
+            "0.1.0",
+            include_str!("../fixtures/releases/0.1.0/settings.toml"),
+            include_str!("../fixtures/releases/0.1.0/export.toml"),
+            true,
+        ),
+        (
+            "0.2.0",
+            include_str!("../fixtures/releases/0.2.0/settings.toml"),
+            include_str!("../fixtures/releases/0.2.0/export.toml"),
+            true,
+        ),
+        (
+            "0.3.0",
+            include_str!("../fixtures/releases/0.3.0/settings.toml"),
+            include_str!("../fixtures/releases/0.3.0/export.toml"),
+            false,
+        ),
+    ];
+
+    #[test]
+    fn every_released_settings_file_loads_with_every_value_kept() {
+        for (version, settings, _, show_status_bar) in RELEASED {
+            let loaded =
+                Settings::parse(settings).unwrap_or_else(|e| panic!("{version}'s settings: {e}"));
+            let mut want = full();
+            want.app.show_status_bar = show_status_bar;
+            assert_eq!(loaded.settings, want, "{version}'s settings");
+            assert_eq!(loaded.warnings, [], "{version}'s settings");
+            assert_eq!(
+                Settings::parse(&loaded.settings.to_documented_toml())
+                    .unwrap()
+                    .settings,
+                want,
+                "{version}'s settings, saved again"
+            );
+        }
+    }
+
+    #[test]
+    fn every_released_jobs_export_imports_with_every_value_kept() {
+        for (version, _, export, _) in RELEASED {
+            let file = crate::jobs_file::parse(export)
+                .unwrap_or_else(|e| panic!("{version}'s export: {e}"));
+            assert_eq!(file.replica_version.as_deref(), Some(version));
+            assert_eq!(file.warnings, [], "{version}'s export");
+            let jobs: Vec<Job> = file
+                .entries
+                .into_iter()
+                .map(|e| {
+                    assert_eq!(e.warnings, [], "{version}'s export, {}", e.label);
+                    e.job.unwrap_or_else(|e| panic!("{version}'s export: {e}"))
+                })
+                .collect();
+            assert_eq!(jobs, full().jobs, "{version}'s export");
+        }
+    }
+
+    /// Writes this version's `settings.toml` and `export.toml` into `fixtures/releases/<version>`
+    /// (docs/RELEASING.md); ignored, so test runs leave the committed files alone.
+    #[test]
+    #[ignore = "writes this version's release fixtures (docs/RELEASING.md)"]
+    fn write_release_fixtures() {
+        let out = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/releases")
+            .join(env!("CARGO_PKG_VERSION"));
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("settings.toml"), full().to_documented_toml()).unwrap();
+        fs::write(
+            out.join("export.toml"),
+            crate::jobs_file::to_toml(&full().jobs),
+        )
+        .unwrap();
+    }
 }
