@@ -440,8 +440,14 @@ impl Backend for Faked {
     fn open_url(&self, _: &str) -> Result<(), String> {
         Ok(())
     }
+    /// Answered here, not by running restic: a `restic version` still running as a test ends
+    /// keeps nextest's output pipes open (Windows hands a child the test's inheritable handles,
+    /// piped output or not), and nextest reports the test as leaking. The bundled restic as an
+    /// installed Replica has it, at the version Replica pins, or the user's own path.
     fn restic_in_use(&self, override_path: Option<PathBuf>) -> Result<(PathBuf, String), String> {
-        self.live.restic_in_use(override_path)
+        let path =
+            override_path.unwrap_or_else(|| PathBuf::from(r"C:\Program Files\Replica\restic.exe"));
+        Ok((path, replica_core::restic::pinned_version().to_owned()))
     }
     fn open_path(&self, _: &Path) -> Result<(), String> {
         Ok(())

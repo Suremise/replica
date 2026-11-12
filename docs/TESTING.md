@@ -99,6 +99,11 @@ default tier in a second terminal, for the load.) Log both runs where the review
   was too short (`with_a_started_program` in `command_tree.rs`).
 - **Clean up, even on failure.** Temp folders, test-only Credential Manager prefixes and Task
   Scheduler folders are removed in `Drop`, so a failed assertion still cleans up.
+- **Leave no process running.** A child process still running when a test ends (restic, started
+  on a thread the test doesn't wait for) holds nextest's output pipes open, piped output or not:
+  Windows hands it the test's inheritable handles. nextest then marks the test `LEAK`, though it
+  passed. Wait for the child, or fake what runs it: the screenshot harness answers restic's
+  version itself (`tests/ui_shots/fake.rs`).
 - **Credential Manager: an in-memory store, else `TestCredentials`.** A test that only needs
   secrets uses `MemorySecretStore`. One that must use the real Credential Manager (it tests the
   API, or runs a real `replica.exe` or tray, which can't share an in-memory store) takes its
