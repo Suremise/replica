@@ -1009,6 +1009,41 @@ fn history_harness(fake: &Arc<Fake>) -> Harness<'static, HistoryTab> {
 }
 
 #[test]
+fn a_narrow_window_scrolls_history_s_table_sideways_to_its_last_columns() {
+    use eframe::egui::{self, accesskit::Role};
+    // Narrower than the table's columns, as the page is at the window's least width.
+    const WIDTH: f32 = 600.0;
+    let (fake, _dir) = backend(vec![]);
+    *fake.runs.lock().unwrap() = vec![run_record(1, "docs", Outcome::Ok)];
+    let mut harness = Harness::builder()
+        .with_size([WIDTH, 800.0])
+        .with_context_setup(setup)
+        .build_ui_state(
+            |ui, tab: &mut HistoryTab| tab.ui(ui),
+            HistoryTab::new(Arc::clone(&fake) as Arc<dyn Backend>),
+        );
+    settle(&mut harness);
+    let size = |h: &Harness<'_, HistoryTab>| h.get_by_label("Sort by Size").rect();
+    assert!(
+        size(&harness).left() > WIDTH,
+        "past the edge at first: {:?}",
+        size(&harness)
+    );
+    // A sideways wheel over the table (the harness's own input, not the screen's) brings the
+    // last columns into view.
+    let over = harness.get_by_role(Role::ListBoxOption).rect().center();
+    harness.event(egui::Event::PointerMoved(over));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(-800.0, 0.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: egui::Modifiers::NONE,
+    });
+    step_until(&mut harness, |h| size(h).right() <= WIDTH);
+}
+
+#[test]
 fn history_shows_every_run_with_its_targets_and_filters_them() {
     let (fake, _dir) = backend(vec![]);
     *fake.runs.lock().unwrap() = vec![
@@ -2142,7 +2177,9 @@ fn restore_s_pickers_close_on_a_screen_reader_s_choice() {
     .save(&fake.settings_file())
     .unwrap();
     let mut harness = restore_harness(&fake);
-    harness.run();
+    // The snapshots load on a thread, with a spinner meanwhile: wait until they're in, not a
+    // fixed few frames (under load the thread is still going after them).
+    settle(&mut harness);
     let (first, second) = (
         drive("BACKUP").display_name(),
         drive("SPARE").display_name(),

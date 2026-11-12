@@ -30,8 +30,9 @@ use super::theme::{self, space};
 use super::widgets::{
     InfoKind, TableColumn, TableState, Tone, danger_button_filled, dialog_frame, dropdown,
     dropdown_choice, dropdown_value, dropdown_width, empty_state, error_text, flow, heading,
-    info_bar, info_row, leaving_room, primary_button, quiet_text, relative_time, secondary_button,
-    section_card, section_card_with_actions, size_text, status_chip, table, tag, tree_folder,
+    info_bar, info_row, leaving_room, primary_button, quiet_mono, quiet_text, relative_time,
+    secondary_button, section_card, section_card_with_actions, size_text, status_chip, table,
+    table_frame, tag, tree_folder,
 };
 
 /// The job and backup pickers' widest, closed: a longer name is cut with "…".
@@ -463,41 +464,47 @@ impl RestoreTab {
             .snapshot
             .as_ref()
             .and_then(|c| snapshots.iter().position(|s| s.id == c.id));
+        // Tags take what the others leave, so the table fits the page at the window's least
+        // width (466 points of fixed columns, Tags at least 80); a long tag shows whole on hover.
         let columns = [
-            TableColumn::new(tr("restore-col-date"), Some(160.0)),
-            TableColumn::new(tr("restore-col-pinned"), Some(90.0)),
-            TableColumn::new(tr("restore-col-host"), Some(140.0)),
-            TableColumn::new(tr("restore-col-tags"), Some(160.0)),
-            TableColumn::new(tr("restore-col-size"), Some(100.0)),
-            TableColumn::new(tr("restore-col-id"), Some(90.0)),
+            TableColumn::new(tr("restore-col-date"), Some(124.0)),
+            TableColumn::new(tr("restore-col-pinned"), Some(64.0)),
+            TableColumn::new(tr("restore-col-host"), Some(110.0)),
+            TableColumn::new(tr("restore-col-tags"), None).at_least(80.0),
+            TableColumn::new(tr("restore-col-size"), Some(84.0)).right_aligned(),
+            TableColumn::new(tr("restore-col-id"), Some(84.0)),
         ];
-        let response = table(
-            ui,
-            &tr("restore-snapshot"),
-            &columns,
-            snapshots.len(),
-            Some(220.0),
-            &mut self.snapshot_table,
-            |i| snapshot_line(&snapshots[i]),
-            |_| {},
-            |ui, row, col| {
-                let s = &snapshots[row];
-                if col == 1 {
-                    if s.is_pinned() {
-                        tag(ui, &tr("restore-pinned")).on_hover_text(tr("restore-pinned-hint"));
-                    }
-                    return;
-                }
-                let text = match col {
-                    0 => snapshot_time(s),
-                    2 => s.hostname.clone(),
-                    3 => shown_tags(s),
-                    4 => snapshot_size(s),
-                    _ => s.short_id.clone(),
-                };
-                quiet_text(ui, &text, None);
-            },
-        );
+        let response = table_frame(theme::of(ui))
+            .show(ui, |ui| {
+                table(
+                    ui,
+                    &tr("restore-snapshot"),
+                    &columns,
+                    snapshots.len(),
+                    Some(220.0),
+                    &mut self.snapshot_table,
+                    |i| snapshot_line(&snapshots[i]),
+                    |_| {},
+                    |ui, row, col| {
+                        let s = &snapshots[row];
+                        if col == 1 {
+                            if s.is_pinned() {
+                                tag(ui, &tr("restore-pinned"))
+                                    .on_hover_text(tr("restore-pinned-hint"));
+                            }
+                            return;
+                        }
+                        match col {
+                            0 => quiet_text(ui, &snapshot_time(s), None),
+                            2 => quiet_text(ui, &s.hostname, None),
+                            3 => quiet_text(ui, &shown_tags(s), None),
+                            4 => quiet_mono(ui, &snapshot_size(s), None),
+                            _ => quiet_mono(ui, &s.short_id, None),
+                        };
+                    },
+                )
+            })
+            .inner;
         self.pin_row(ui, job, target);
         if response.selection_changed
             && let Some(s) = self.snapshot_table.selected.and_then(|i| snapshots.get(i))
@@ -608,9 +615,9 @@ impl RestoreTab {
         let p = theme::of(ui);
         let mut chosen = self.selected.contains(&node.path);
         ui.horizontal(|ui| {
-            ui.set_min_height(28.0);
+            ui.set_min_height(24.0);
             // Where a folder's arrow is, so files line up with folders.
-            ui.add_space(20.0 + ui.spacing().item_spacing.x);
+            ui.add_space(18.0 + ui.spacing().item_spacing.x);
             let name = tr!(
                 "restore-file-line",
                 name = node.name.as_str(),
@@ -623,14 +630,14 @@ impl RestoreTab {
             Icon::File.paint(ui.painter(), icon, p.text_secondary);
             // A long name is cut, its size kept after it.
             let size = size_text(node.size);
-            let font = egui::TextStyle::Body.resolve(ui.style());
+            let font = egui::TextStyle::Monospace.resolve(ui.style());
             let size_width = ui
                 .painter()
                 .layout_no_wrap(size.clone(), font, p.text_secondary)
                 .size()
                 .x;
             leaving_room(ui, size_width, |ui| quiet_text(ui, &node.name, None));
-            quiet_text(ui, &size, Some(p.text_secondary));
+            quiet_mono(ui, &size, Some(p.text_secondary));
         });
     }
 

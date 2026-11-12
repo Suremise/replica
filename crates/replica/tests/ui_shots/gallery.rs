@@ -6,12 +6,13 @@ use eframe::egui::{self, RichText, ScrollArea, Ui};
 use replica::ui::icons::Icon;
 use replica::ui::theme::{self, MAX_CONTENT_WIDTH, space};
 use replica::ui::widgets::{
-    InfoKind, Sort, TableColumn, TableState, Tone, danger_button, danger_button_filled,
-    empty_state, icon_button, info_bar, path_field, primary_button, secondary_button, section_card,
-    segmented, setting_row, status_chip, tab_strip, table, toggle, toolbar, toolbar_group_gap,
+    InfoKind, Sort, TableColumn, TableState, Tone, command_button, danger_button,
+    danger_button_filled, empty_state, icon_button, info_bar, path_field, primary_button,
+    primary_button_with_icon, progress_chip, secondary_button, section_card, segmented,
+    setting_row, small_toggle, status_chip, tab_strip, table, toggle, toolbar, toolbar_separator,
 };
 
-const ICONS: [Icon; 14] = [
+const ICONS: [Icon; 16] = [
     Icon::Jobs,
     Icon::History,
     Icon::Restore,
@@ -26,6 +27,8 @@ const ICONS: [Icon; 14] = [
     Icon::Empty,
     Icon::Delete,
     Icon::Refresh,
+    Icon::Export,
+    Icon::Import,
 ];
 
 /// The table's rows: job, result, size.
@@ -187,11 +190,11 @@ impl Gallery {
             );
             ui.add_space(space::L);
             toolbar(ui, |ui| {
-                primary_button(ui, "New job");
-                secondary_button(ui, "Run all");
-                toolbar_group_gap(ui);
-                secondary_button(ui, "Export");
-                secondary_button(ui, "Import");
+                primary_button_with_icon(ui, Icon::Add, "New job");
+                command_button(ui, Icon::Play, "Run all");
+                toolbar_separator(ui);
+                command_button(ui, Icon::Export, "Export");
+                command_button(ui, Icon::Import, "Import");
             });
         });
 
@@ -204,6 +207,14 @@ impl Gallery {
                 status_chip(ui, Tone::Neutral, "Not run");
                 status_chip(ui, Tone::Info, "Installed");
             });
+            ui.add_space(space::S);
+            ui.horizontal(|ui| {
+                ui.set_max_width(140.0);
+                progress_chip(ui, 0.42, "Running, 42%");
+            });
+            ui.add_space(space::S);
+            let mut on = true;
+            small_toggle(ui, &mut on).accessible_name("In a table's row");
         });
 
         section_card(ui, "Path fields", None, |ui| {

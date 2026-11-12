@@ -1,5 +1,7 @@
 //! The window's look: colours for Windows' light and dark modes, the type scale and the
-//! spacing, applied to egui's two styles. Modelled on Windows 11 Settings, not a copy of it.
+//! spacing, applied to egui's two styles. Compact and quiet, as a technical tool's window is
+//! (Explorer's details view more than Windows 11 Settings): dense rows, hairline grids, small
+//! corners, flat command buttons.
 //!
 //! egui follows Windows' light or dark mode by itself (its theme preference is "system", and
 //! winit reports a change while the app runs), so [`install`] sets both styles once and the
@@ -35,8 +37,14 @@ pub struct Palette {
     /// An item in a list or the sidebar, hovered and selected.
     pub subtle_hover: Color32,
     pub subtle_selected: Color32,
-    /// Every other row of a table, on a card.
+    /// Every other row of a table, on a card (a table draws hairlines instead; egui's own
+    /// striped lists use it).
     pub stripe: Color32,
+    /// A table's header row, tinted apart from its rows.
+    pub header: Color32,
+    /// A table's hairlines: under its header, between its rows and its columns. Decoration
+    /// only, as [`Palette::border`].
+    pub grid: Color32,
     pub text: Color32,
     /// Descriptions, hints and other text that comes second.
     pub text_secondary: Color32,
@@ -83,6 +91,8 @@ pub const LIGHT: Palette = Palette {
     subtle_hover: hex(0xEAEAEA),
     subtle_selected: hex(0xE3E3E3),
     stripe: hex(0xF4F4F4),
+    header: hex(0xF0F0F0),
+    grid: hex(0xE6E6E6),
     text: hex(0x1B1B1B),
     text_secondary: hex(0x5D5D5D),
     // Replica's teal.
@@ -119,6 +129,8 @@ pub const DARK: Palette = Palette {
     subtle_hover: hex(0x2D2D2D),
     subtle_selected: hex(0x333333),
     stripe: hex(0x313131),
+    header: hex(0x323232),
+    grid: hex(0x383838),
     text: hex(0xFFFFFF),
     text_secondary: hex(0xC8C8C8),
     // Replica's teal, lighter for the dark background.
@@ -153,47 +165,52 @@ pub mod space {
     pub const XXL: f32 = 32.0;
     pub const XXXL: f32 = 40.0;
 
-    // What the scale is used for (roomier than a first pass).
+    // What the scale is used for: compact, as a technical tool's window is.
 
     /// Round a page's content: the window's edges, and the sidebar at a narrower width.
-    pub const PAGE_MARGIN: f32 = XXL;
+    pub const PAGE_MARGIN: f32 = 20.0;
     /// Between the full-width sidebar and the page.
-    pub const SIDEBAR_GAP: f32 = XXXL;
+    pub const SIDEBAR_GAP: f32 = XL;
     /// Under a page's header, before its first content.
-    pub const UNDER_HEADER: f32 = XL;
+    pub const UNDER_HEADER: f32 = M;
     /// Between one card and the next.
-    pub const CARD_GAP: f32 = L;
+    pub const CARD_GAP: f32 = M;
     /// Inside a card, round its contents.
-    pub const CARD_PADDING: f32 = 20.0;
+    pub const CARD_PADDING: f32 = M;
     /// Above and below a setting row's text and control.
-    pub const ROW_PADDING: f32 = M;
+    pub const ROW_PADDING: f32 = 6.0;
     /// The least height of a setting row with a description.
-    pub const ROW_MIN_HEIGHT: f32 = 52.0;
-    /// Between the controls of a toolbar, and between its groups.
-    pub const TOOLBAR_GAP: f32 = S;
-    pub const TOOLBAR_GROUP_GAP: f32 = M;
+    pub const ROW_MIN_HEIGHT: f32 = 40.0;
+    /// Between the controls of a toolbar, and between its groups (a separator in the middle).
+    pub const TOOLBAR_GAP: f32 = XS;
+    pub const TOOLBAR_GROUP_GAP: f32 = S;
     /// Above and below a table row's tallest cell, and the least height of a row.
-    pub const TABLE_ROW_PADDING: f32 = 10.0;
-    pub const TABLE_ROW_MIN_HEIGHT: f32 = 40.0;
+    pub const TABLE_ROW_PADDING: f32 = 5.0;
+    pub const TABLE_ROW_MIN_HEIGHT: f32 = 30.0;
+    /// A table's header row.
+    pub const TABLE_HEADER_HEIGHT: f32 = 28.0;
     /// The sidebar's items.
-    pub const NAV_ITEM_HEIGHT: f32 = 40.0;
-    pub const NAV_ITEM_GAP: f32 = XS;
+    pub const NAV_ITEM_HEIGHT: f32 = 32.0;
+    pub const NAV_ITEM_GAP: f32 = 2.0;
 }
 
 /// Buttons, fields and the sidebar's items.
-pub const CONTROL_HEIGHT: f32 = 32.0;
-pub const CARD_RADIUS: u8 = 6;
-pub const CONTROL_RADIUS: u8 = 4;
-/// The widest a page's content gets, so lines stay readable on a wide window.
-pub const MAX_CONTENT_WIDTH: f32 = 880.0;
+pub const CONTROL_HEIGHT: f32 = 28.0;
+pub const CARD_RADIUS: u8 = 4;
+pub const CONTROL_RADIUS: u8 = 3;
+/// The widest a page's content gets: room for a table's columns, not a page of prose.
+pub const MAX_CONTENT_WIDTH: f32 = 1040.0;
 
 /// The type scale, in points.
-pub const TITLE_SIZE: f32 = 24.0;
-pub const SECTION_SIZE: f32 = 16.0;
-pub const BODY_SIZE: f32 = 14.0;
+pub const TITLE_SIZE: f32 = 20.0;
+pub const SECTION_SIZE: f32 = 14.0;
+pub const BODY_SIZE: f32 = 13.0;
 pub const SMALL_SIZE: f32 = 12.0;
+/// Paths, repository locations, snapshot IDs and sizes in lists (Cascadia Mono or Consolas):
+/// a little under the body's size, where it reads the same height.
+pub const MONO_SIZE: f32 = 12.0;
 
-/// A section's title: 16 semibold ([`TextStyle::Heading`] is the page's title).
+/// A section's title: 14 semibold ([`TextStyle::Heading`] is the page's title).
 pub fn section_style() -> TextStyle {
     TextStyle::Name("section".into())
 }
@@ -243,7 +260,7 @@ fn style(p: &Palette, mut visuals: Visuals) -> Style {
         ),
         (
             TextStyle::Monospace,
-            FontId::new(13.0, FontFamily::Monospace),
+            FontId::new(MONO_SIZE, FontFamily::Monospace),
         ),
     ]
     .into();
@@ -253,13 +270,13 @@ fn style(p: &Palette, mut visuals: Visuals) -> Style {
     };
 
     let spacing = &mut style.spacing;
-    spacing.item_spacing = egui::vec2(space::S, 6.0);
-    spacing.button_padding = egui::vec2(space::M, 5.0);
+    spacing.item_spacing = egui::vec2(6.0, space::XS);
+    spacing.button_padding = egui::vec2(10.0, 3.0);
     spacing.interact_size = egui::vec2(40.0, 24.0);
-    spacing.icon_width = 18.0;
-    spacing.icon_width_inner = 10.0;
-    spacing.icon_spacing = space::S;
-    spacing.window_margin = Margin::same(space::XL as i8);
+    spacing.icon_width = 16.0;
+    spacing.icon_width_inner = 8.0;
+    spacing.icon_spacing = 6.0;
+    spacing.window_margin = Margin::same(space::L as i8);
     spacing.menu_margin = Margin::same(space::XS as i8);
 
     let control = CornerRadius::same(CONTROL_RADIUS);
@@ -294,7 +311,7 @@ fn style(p: &Palette, mut visuals: Visuals) -> Style {
     visuals.panel_fill = p.background;
     visuals.window_fill = p.card;
     visuals.window_stroke = Stroke::new(1.0, p.border);
-    visuals.window_corner_radius = CornerRadius::same(8);
+    visuals.window_corner_radius = CornerRadius::same(CARD_RADIUS + 2);
     visuals.menu_corner_radius = CornerRadius::same(CARD_RADIUS);
     visuals.window_shadow = Shadow {
         offset: [0, 8],
@@ -359,7 +376,7 @@ mod tests {
 
     /// WCAG AA: body text.
     const TEXT: f32 = 4.5;
-    /// WCAG AA: large text (the 24 pt title), and glyphs and outlines that show a control.
+    /// WCAG AA: glyphs and outlines that show a control.
     const UI: f32 = 3.0;
 
     /// Each pair the widgets draw: (what, foreground, background, the ratio it needs).
@@ -371,6 +388,7 @@ mod tests {
             ("subtle hover", p.subtle_hover),
             ("subtle selected", p.subtle_selected),
             ("table stripe", p.stripe),
+            ("table header", p.header),
             ("control", p.control),
             ("control hover", p.control_hover),
             ("control pressed", p.control_pressed),

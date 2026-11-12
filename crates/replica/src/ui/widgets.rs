@@ -202,8 +202,8 @@ pub fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::new()
         .fill(p.card)
         .stroke(Stroke::new(1.0, p.border))
-        .corner_radius(CornerRadius::same(8))
-        .inner_margin(Margin::same(space::XL as i8))
+        .corner_radius(CornerRadius::same(CARD_RADIUS + 2))
+        .inner_margin(Margin::same(20))
         .shadow(style.visuals.window_shadow)
 }
 
@@ -214,6 +214,12 @@ pub fn card_frame(p: &Palette) -> egui::Frame {
         .stroke(Stroke::new(1.0, p.border))
         .corner_radius(CornerRadius::same(CARD_RADIUS))
         .inner_margin(Margin::same(space::CARD_PADDING as i8))
+}
+
+/// A [`card_frame`] round a [`table`]: no padding, so the header's tint and the rows reach the
+/// card's border, as a list view's do.
+pub fn table_frame(p: &Palette) -> egui::Frame {
+    card_frame(p).inner_margin(Margin::same(1))
 }
 
 /// A row in a card: `label`, with `description` under it, on the left, and the control
@@ -351,6 +357,11 @@ fn divider(ui: &mut Ui, p: &Palette) {
         .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, p.border));
 }
 
+/// A button's icon, in points, the room between it and the text, and the room either side.
+const BUTTON_ICON: f32 = 14.0;
+const BUTTON_ICON_GAP: f32 = 6.0;
+const BUTTON_PADDING: f32 = 10.0;
+
 /// A button at the control height in `fills` (at rest, hovered, pressed), its text (and
 /// `icon`, if any, before it) in `colour`.
 fn styled_button(
@@ -361,10 +372,29 @@ fn styled_button(
     colour: Color32,
     border: Stroke,
 ) -> Response {
+    styled_button_in(ui, icon, text, fills, [colour, colour], border, 72.0)
+}
+
+/// [`styled_button`] with the icon's colour apart from the text's (`colours`: text, icon), at
+/// least `least` wide.
+fn styled_button_in(
+    ui: &mut Ui,
+    icon: Option<Icon>,
+    text: &str,
+    fills: [Color32; 3],
+    colours: [Color32; 2],
+    border: Stroke,
+    least: f32,
+) -> Response {
+    let [colour, icon_colour] = colours;
     let font = egui::TextStyle::Button.resolve(ui.style());
     let galley = ui.painter().layout_no_wrap(text.to_owned(), font, colour);
-    let icon_width = if icon.is_some() { 16.0 + space::S } else { 0.0 };
-    let width = (2.0 * space::M + icon_width + galley.size().x).max(88.0);
+    let icon_width = if icon.is_some() {
+        BUTTON_ICON + BUTTON_ICON_GAP
+    } else {
+        0.0
+    };
+    let width = (2.0 * BUTTON_PADDING + icon_width + galley.size().x).max(least);
     let (rect, response) = ui.allocate_exact_size(vec2(width, CONTROL_HEIGHT), Sense::click());
     let enabled = ui.is_enabled();
     response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, text));
@@ -388,9 +418,11 @@ fn styled_button(
         );
         let mut x = rect.center().x - (icon_width + galley.size().x) / 2.0;
         if let Some(icon) = icon {
-            let r =
-                egui::Rect::from_min_size(egui::pos2(x, rect.center().y - 8.0), vec2(16.0, 16.0));
-            icon.paint(painter, r.shrink(1.0), colour);
+            let r = egui::Rect::from_min_size(
+                egui::pos2(x, rect.center().y - BUTTON_ICON / 2.0),
+                vec2(BUTTON_ICON, BUTTON_ICON),
+            );
+            icon.paint(painter, r, icon_colour);
             x += icon_width;
         }
         let y = rect.center().y - galley.size().y / 2.0;
@@ -409,6 +441,34 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
         [p.accent, p.accent_hover, p.accent_pressed],
         p.on_accent,
         Stroke::NONE,
+    )
+}
+
+/// [`primary_button`] with `icon` before its text: a command bar's main action ("New job").
+pub fn primary_button_with_icon(ui: &mut Ui, icon: Icon, text: &str) -> Response {
+    let p = theme::of(ui);
+    styled_button(
+        ui,
+        Some(icon),
+        text,
+        [p.accent, p.accent_hover, p.accent_pressed],
+        p.on_accent,
+        Stroke::NONE,
+    )
+}
+
+/// A command bar's button: flat (filled only when hovered or pressed), `icon` in the accent
+/// before `text`. Group them with [`toolbar_separator`].
+pub fn command_button(ui: &mut Ui, icon: Icon, text: &str) -> Response {
+    let p = theme::of(ui);
+    styled_button_in(
+        ui,
+        Some(icon),
+        text,
+        [Color32::TRANSPARENT, p.subtle_hover, p.subtle_selected],
+        [p.text, p.accent],
+        Stroke::NONE,
+        0.0,
     )
 }
 
@@ -460,7 +520,7 @@ pub fn danger_button_filled(ui: &mut Ui, text: &str) -> Response {
 /// A button with only an icon: `name` is what a screen reader says and the hover text.
 pub fn icon_button(ui: &mut Ui, icon: Icon, name: &str) -> Response {
     let p = theme::of(ui);
-    let (rect, response) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(ICON_BUTTON, ICON_BUTTON), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), name));
     if ui.is_rect_visible(rect) {
         let fill = if response.is_pointer_button_down_on() {
@@ -472,10 +532,13 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, name: &str) -> Response {
         };
         ui.painter()
             .rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), fill);
-        icon.paint(ui.painter(), rect.shrink(7.0), p.text);
+        icon.paint(ui.painter(), rect.shrink(6.0), p.text);
     }
     response.on_hover_text(name)
 }
+
+/// An [`icon_button`]'s side, in points.
+pub const ICON_BUTTON: f32 = 24.0;
 
 /// How a status reads: each has its colour and its own glyph, so it isn't told by colour alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -535,7 +598,8 @@ pub fn segmented(ui: &mut Ui, options: &[&str], selected: usize) -> (Response, O
                             egui::TextStyle::Button.resolve(ui.style()),
                             colour,
                         );
-                        let size = vec2(galley.size().x + 2.0 * space::M, CONTROL_HEIGHT - 4.0);
+                        let size =
+                            vec2(galley.size().x + 2.0 * BUTTON_PADDING, CONTROL_HEIGHT - 4.0);
                         let (rect, response) = ui.allocate_exact_size(size, Sense::click());
                         response.widget_info(|| {
                             WidgetInfo::selected(Role::RadioButton, enabled, on, *option)
@@ -577,8 +641,31 @@ pub fn relative_time(at: chrono::NaiveDateTime, now: chrono::NaiveDateTime) -> S
     replica_core::tr!(&key, n = n)
 }
 
-/// A small pill with a status's glyph and `text` (which a screen reader reads).
+/// A small chip with a status's glyph and `text` (which a screen reader reads).
 pub fn status_chip(ui: &mut Ui, tone: Tone, text: &str) -> Response {
+    status_chip_at_least(ui, tone, text, 0.0)
+}
+
+/// A [`status_chip`] in a table's cell: as wide as the column (up to [`CELL_CHIP_WIDTH`]), so a
+/// column's chips line up whatever they say.
+pub fn cell_status_chip(ui: &mut Ui, tone: Tone, text: &str) -> Response {
+    let width = cell_chip_width(ui);
+    status_chip_at_least(ui, tone, text, width)
+}
+
+/// The widest a chip in a table's cell is made, to line up with the others.
+pub const CELL_CHIP_WIDTH: f32 = 116.0;
+
+/// How wide a chip in a table's cell is (when its text fits).
+fn cell_chip_width(ui: &Ui) -> f32 {
+    ui.available_width().min(CELL_CHIP_WIDTH)
+}
+
+/// A chip's height, and the room either side of its contents.
+const CHIP_HEIGHT: f32 = 20.0;
+const CHIP_PADDING: f32 = 6.0;
+
+fn status_chip_at_least(ui: &mut Ui, tone: Tone, text: &str, least: f32) -> Response {
     let p = theme::of(ui);
     let (fg, fill, icon) = tone.colours(p);
     let galley = ui.painter().layout_no_wrap(
@@ -587,16 +674,16 @@ pub fn status_chip(ui: &mut Ui, tone: Tone, text: &str) -> Response {
         fg,
     );
     let glyph = CHIP_GLYPH;
-    let pad = vec2(space::S, space::XS);
+    let pad = vec2(CHIP_PADDING, 2.0);
     let size = vec2(
-        status_chip_width(ui, text),
-        (galley.size().y + pad.y * 2.0).max(22.0),
+        status_chip_width(ui, text).max(least),
+        (galley.size().y + pad.y * 2.0).max(CHIP_HEIGHT),
     );
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        painter.rect_filled(rect, CornerRadius::same(u8::MAX), fill);
+        painter.rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), fill);
         let icon_rect = egui::Rect::from_center_size(
             egui::pos2(rect.left() + pad.x + glyph / 2.0, rect.center().y),
             vec2(glyph, glyph),
@@ -665,7 +752,7 @@ pub fn path_field(ui: &mut Ui, path: &str) -> Response {
             bottom: 2,
         })
         .show(ui, |ui| {
-            let size = vec2(ui.available_width(), CONTROL_HEIGHT - 6.0);
+            let size = vec2(ui.available_width(), CONTROL_HEIGHT - 4.0);
             ui.allocate_ui_with_layout(size, Layout::right_to_left(Align::Center), |ui| {
                 if icon_button(ui, Icon::Copy, &copy_name).clicked() {
                     ui.ctx().copy_text(path.to_owned());
@@ -694,8 +781,16 @@ pub fn path_field(ui: &mut Ui, path: &str) -> Response {
 /// An on/off switch, as Windows 11's settings use: the accent when on. Read as a check box;
 /// name it with [`setting_row`] or [`Response::labelled_by`].
 pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
+    switch(ui, on, vec2(36.0, 18.0))
+}
+
+/// A smaller [`toggle`], for a table's rows.
+pub fn small_toggle(ui: &mut Ui, on: &mut bool) -> Response {
+    switch(ui, on, vec2(28.0, 14.0))
+}
+
+fn switch(ui: &mut Ui, on: &mut bool, size: egui::Vec2) -> Response {
     let p = theme::of(ui);
-    let size = vec2(40.0, 20.0);
     let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
     if response.clicked() {
         *on = !*on;
@@ -722,8 +817,9 @@ pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
             );
         }
         let knob = if *on { p.on_accent } else { p.text_secondary };
-        let x = egui::lerp(rect.left() + 10.0..=rect.right() - 10.0, t);
-        let r = if hovered { 7.0 } else { 6.0 };
+        let half = rect.height() / 2.0;
+        let x = egui::lerp(rect.left() + half..=rect.right() - half, t);
+        let r = half - if hovered { 3.0 } else { 4.0 };
         painter.circle_filled(egui::pos2(x, rect.center().y), r, knob);
     }
     response
@@ -735,17 +831,17 @@ pub fn empty_state(ui: &mut Ui, icon: Icon, title: &str, text: &str, action: Opt
     let p = theme::of(ui);
     let mut clicked = false;
     ui.vertical_centered(|ui| {
-        ui.add_space(space::XL);
-        let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+        ui.add_space(space::L);
+        let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
         icon.paint(ui.painter(), rect, p.text_secondary);
-        ui.add_space(space::M);
+        ui.add_space(space::S);
         ui.label(RichText::new(title).text_style(theme::section_style()));
         ui.label(RichText::new(text).color(p.text_secondary));
         if let Some(action) = action {
             ui.add_space(space::M);
             clicked = primary_button(ui, action).clicked();
         }
-        ui.add_space(space::XL);
+        ui.add_space(space::L);
     });
     clicked
 }
@@ -777,11 +873,11 @@ pub fn info_bar(ui: &mut Ui, kind: InfoKind, title: Option<&str>, text: &str) ->
             .fill(fill)
             .stroke(Stroke::new(1.0, p.border))
             .corner_radius(CornerRadius::same(CONTROL_RADIUS))
-            .inner_margin(Margin::symmetric(space::M as i8, space::S as i8 + 2))
+            .inner_margin(Margin::symmetric(10, 6))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_top(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::hover());
+                    let (rect, _) = ui.allocate_exact_size(vec2(14.0, 17.0), Sense::hover());
                     icon.paint(ui.painter(), rect, glyph);
                     ui.add_space(space::XS);
                     ui.horizontal_wrapped(|ui| {
@@ -800,14 +896,61 @@ pub fn info_bar(ui: &mut Ui, kind: InfoKind, title: Option<&str>, text: &str) ->
 /// Text drawn without a node of its own in the accessibility tree, cut with "…" to the width
 /// it has and shown whole on hover: for a table's cells, whose row is named with all of them.
 pub fn quiet_text(ui: &mut Ui, text: &str, colour: Option<Color32>) -> Response {
-    let colour = colour.unwrap_or(theme::of(ui).text);
     let font = egui::TextStyle::Body.resolve(ui.style());
+    quiet(ui, text, font, colour, false)
+}
+
+/// [`quiet_text`] in monospace: a snapshot's ID, a size in a list.
+pub fn quiet_mono(ui: &mut Ui, text: &str, colour: Option<Color32>) -> Response {
+    let font = egui::TextStyle::Monospace.resolve(ui.style());
+    quiet(ui, text, font, colour, false)
+}
+
+/// [`quiet_text`] for a path or a target: monospace, cut in the middle (keeping its end, the
+/// part that tells one from another), whole on hover.
+pub fn quiet_path(ui: &mut Ui, text: &str, colour: Option<Color32>) -> Response {
+    let font = egui::TextStyle::Monospace.resolve(ui.style());
+    quiet(ui, text, font, colour, true)
+}
+
+/// A path or a target as a label of its own (for a table whose rows are named by one cell
+/// alone): monospace, cut in the middle to the width it has, and read whole, whole on hover too.
+pub fn path_label(ui: &mut Ui, text: &str) -> Response {
+    let font = egui::TextStyle::Monospace.resolve(ui.style());
+    let shown = middle_ellipsis(ui, text, &font, ui.available_width().max(0.0));
+    let cut = shown != text;
+    let response = ui.add(
+        egui::Label::new(RichText::new(shown).font(font))
+            .truncate()
+            .sense(Sense::hover()),
+    );
+    response
+        .ctx
+        .accesskit_node_builder(response.id, |node| node.set_label(text));
+    if cut {
+        response.on_hover_text(text)
+    } else {
+        response
+    }
+}
+
+fn quiet(
+    ui: &mut Ui,
+    text: &str,
+    font: egui::FontId,
+    colour: Option<Color32>,
+    middle: bool,
+) -> Response {
+    let colour = colour.unwrap_or(theme::of(ui).text);
     let width = ui.available_width().max(0.0);
     let full = ui
         .painter()
         .layout_no_wrap(text.to_owned(), font.clone(), colour);
     let cut = full.size().x > width;
-    let shown = if cut {
+    let shown = if cut && middle {
+        let shown = middle_ellipsis(ui, text, &font, width);
+        ui.painter().layout_no_wrap(shown, font, colour)
+    } else if cut {
         let mut job = egui::text::LayoutJob::single_section(
             text.to_owned(),
             egui::TextFormat::simple(font, colour),
@@ -843,10 +986,10 @@ pub fn tree_folder(
     let mut open: bool = ui.data(|d| d.get_temp(id)).unwrap_or(false);
     let mut changed = false;
     ui.horizontal(|ui| {
-        ui.set_min_height(28.0);
+        ui.set_min_height(24.0);
         // The arrow: the tree item a screen reader reads, named by the folder, with its
         // expanded state.
-        let (arrow_rect, arrow) = ui.allocate_exact_size(vec2(20.0, 24.0), Sense::click());
+        let (arrow_rect, arrow) = ui.allocate_exact_size(vec2(18.0, 22.0), Sense::click());
         arrow.widget_info(|| WidgetInfo::labeled(Role::TreeItem, true, name));
         let (expand, collapse) = ui.input(|i| {
             (
@@ -973,8 +1116,9 @@ pub struct TableResponse {
     pub activated: Option<usize>,
 }
 
-/// A table of `rows` rows over `egui_extras`' `TableBuilder`: a header (titles a click sorts,
-/// for sortable columns), striped rows, resizable columns and row selection. Its rows are as
+/// A table of `rows` rows over `egui_extras`' `TableBuilder`: a tinted header (titles a click
+/// sorts, for sortable columns) with a rule under it and thin lines between its columns, rows
+/// with hairlines between them, resizable columns and row selection. Its rows are as
 /// tall as the tallest cell seen in it (a two-line one makes them all taller), with
 /// [`space::TABLE_ROW_PADDING`] above and below, and never under
 /// [`space::TABLE_ROW_MIN_HEIGHT`]; a cell's content is centred in its row's height.
@@ -1057,7 +1201,7 @@ pub fn table(
     let mut tallest = tallest_seen;
     let mut builder = TableBuilder::new(ui)
         .id_salt(id)
-        .striped(true)
+        .striped(false)
         .resizable(true)
         .sense(Sense::CLICK)
         .cell_layout(Layout::left_to_right(Align::Center))
@@ -1087,9 +1231,26 @@ pub fn table(
 
     let mut selected_row_id = None;
     let output = builder
-        .header(CONTROL_HEIGHT, |mut header| {
+        .header(space::TABLE_HEADER_HEIGHT, |mut header| {
             for (i, c) in columns.iter().enumerate() {
                 header.col(|ui| {
+                    // The header's tint, its rule, and a line at the right of each title but
+                    // the last.
+                    let cell = ui.max_rect();
+                    let painter = ui.painter();
+                    painter.rect_filled(cell, 0.0, p.header);
+                    painter.hline(
+                        cell.x_range(),
+                        cell.bottom() - 0.5,
+                        Stroke::new(1.0, p.grid),
+                    );
+                    if i + 1 < columns.len() {
+                        painter.vline(
+                            cell.right() - 0.5,
+                            cell.shrink2(vec2(0.0, 6.0)).y_range(),
+                            Stroke::new(1.0, p.grid),
+                        );
+                    }
                     pad(ui);
                     // A column of numbers has its title at its right edge, over them.
                     let mut right;
@@ -1105,7 +1266,7 @@ pub fn table(
                     };
                     let sorted = state.sort.filter(|s| s.column == i);
                     let text = RichText::new(&c.title)
-                        .font(theme::semibold(theme::SMALL_SIZE))
+                        .font(egui::FontId::proportional(theme::SMALL_SIZE))
                         .color(p.text_secondary);
                     if !c.sortable {
                         ui.label(text);
@@ -1172,6 +1333,13 @@ pub fn table(
                                 Sense::hover(),
                             ));
                         }
+                        // The hairline under the row, a cell at a time.
+                        let bounds = ui.max_rect();
+                        ui.painter().hline(
+                            bounds.x_range(),
+                            bounds.bottom() - 0.5,
+                            Stroke::new(1.0, p.grid),
+                        );
                         pad(ui);
                         ui.style_mut().interaction.selectable_labels = false;
                         // The content in a band as tall as the tallest cell's, centred in the
@@ -1293,14 +1461,14 @@ pub fn tag(ui: &mut Ui, text: &str) -> Response {
         egui::FontId::proportional(theme::SMALL_SIZE),
         p.text_secondary,
     );
-    let size = vec2(tag_width(ui, text), 20.0);
+    let size = vec2(tag_width(ui, text), 18.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         painter.rect(
             rect,
-            CornerRadius::same(CONTROL_RADIUS),
+            CornerRadius::same(2),
             p.neutral_fill,
             Stroke::NONE,
             egui::StrokeKind::Inside,
@@ -1365,7 +1533,7 @@ pub fn copy_field(ui: &mut Ui, text: &str, copy_name: &str) -> bool {
                 ui.add(
                     egui::Label::new(
                         RichText::new(text)
-                            .font(egui::FontId::monospace(18.0))
+                            .font(egui::FontId::monospace(16.0))
                             .color(p.text),
                     )
                     .selectable(true),
@@ -1397,11 +1565,11 @@ pub fn message_bar(ui: &mut Ui, kind: InfoKind, text: &str) -> Response {
             .fill(fill)
             .stroke(Stroke::new(1.0, p.border))
             .corner_radius(CornerRadius::same(CONTROL_RADIUS))
-            .inner_margin(Margin::symmetric(space::M as i8, space::S as i8 + 2))
+            .inner_margin(Margin::symmetric(10, 6))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_top(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::hover());
+                    let (rect, _) = ui.allocate_exact_size(vec2(14.0, 17.0), Sense::hover());
                     icon.paint(ui.painter(), rect, glyph);
                     ui.add_space(space::XS);
                     let label = ui.add(egui::Label::new(text).wrap());
@@ -1419,17 +1587,19 @@ pub fn message_bar(ui: &mut Ui, kind: InfoKind, text: &str) -> Response {
     .inner
 }
 
-/// A chip the size of the column's width at most, that fills with the accent as `fraction`
-/// (0 to 1) of something is done: a track across the whole chip in the neutral fill, and
-/// `text` centred over both. Read as a progress indicator named `text`.
+/// Something running, as wide as a table cell's chips: `text` ("Running, 42%") over a slim
+/// bar that fills with the accent as `fraction` (0 to 1) of it is done. Read as a progress
+/// indicator named `text`.
 pub fn progress_chip(ui: &mut Ui, fraction: f32, text: &str) -> Response {
     let p = theme::of(ui);
     let fraction = fraction.clamp(0.0, 1.0);
-    let galley =
-        ui.painter()
-            .layout_no_wrap(text.to_owned(), theme::semibold(theme::SMALL_SIZE), p.text);
-    let width = (galley.size().x + 2.0 * space::M).max(ui.available_width().min(140.0));
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(theme::SMALL_SIZE),
+        p.text,
+    );
+    let width = galley.size().x.max(cell_chip_width(ui));
+    let (rect, response) = ui.allocate_exact_size(vec2(width, CHIP_HEIGHT + 2.0), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::ProgressIndicator, true, text));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_numeric_value(f64::from(fraction) * 100.0);
@@ -1438,31 +1608,24 @@ pub fn progress_chip(ui: &mut Ui, fraction: f32, text: &str) -> Response {
     });
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        let radius = CornerRadius::same(u8::MAX);
-        painter.rect_filled(rect, radius, p.neutral_fill);
-        let done =
-            egui::Rect::from_min_size(rect.min, vec2(rect.width() * fraction, rect.height()));
-        // The selection's tint in light mode; in dark mode it's too near the track, so the
-        // accent half-blended over it (white text on it is still over 6:1).
-        let fill = if ui.visuals().dark_mode {
-            p.accent.gamma_multiply(0.45)
-        } else {
-            p.selection
-        };
-        painter.with_clip_rect(done).rect_filled(rect, radius, fill);
-        painter.rect_stroke(
-            rect,
-            radius,
-            Stroke::new(1.0, p.accent),
-            egui::StrokeKind::Inside,
+        painter.galley(rect.left_top(), galley, p.text);
+        // The bar: a track in the neutral fill, the part done in the accent (3:1 against the
+        // card and the track, so it reads without the words).
+        let track = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), rect.bottom() - 4.0),
+            rect.right_bottom(),
         );
-        painter.galley(rect.center() - galley.size() / 2.0, galley, p.text);
+        let radius = CornerRadius::same(2);
+        painter.rect_filled(track, radius, p.neutral_fill);
+        let done =
+            egui::Rect::from_min_size(track.min, vec2(track.width() * fraction, track.height()));
+        painter.rect_filled(done, radius, p.accent);
     }
     response
 }
 
 /// A status chip for a live state that isn't a result ("Waiting its turn"): `icon` in the
-/// accent and `text`, on the info fill.
+/// accent and `text`, on the info fill. As wide as a table cell's chips.
 pub fn info_chip(ui: &mut Ui, icon: Icon, text: &str) -> Response {
     let p = theme::of(ui);
     let galley = ui.painter().layout_no_wrap(
@@ -1470,17 +1633,17 @@ pub fn info_chip(ui: &mut Ui, icon: Icon, text: &str) -> Response {
         egui::FontId::proportional(theme::SMALL_SIZE),
         p.text,
     );
-    let glyph = 12.0;
-    let pad = vec2(space::S, space::XS);
+    let glyph = CHIP_GLYPH;
+    let pad = vec2(CHIP_PADDING, 2.0);
     let size = vec2(
-        pad.x * 2.0 + glyph + space::XS + galley.size().x,
-        (galley.size().y + pad.y * 2.0).max(22.0),
+        (pad.x * 2.0 + glyph + space::XS + galley.size().x).max(cell_chip_width(ui)),
+        (galley.size().y + pad.y * 2.0).max(CHIP_HEIGHT),
     );
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        painter.rect_filled(rect, CornerRadius::same(u8::MAX), p.info_fill);
+        painter.rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), p.info_fill);
         let icon_rect = egui::Rect::from_center_size(
             egui::pos2(rect.left() + pad.x + glyph / 2.0, rect.center().y),
             vec2(glyph, glyph),
@@ -1514,8 +1677,8 @@ pub fn steps(ui: &mut Ui, names: &[String], current: usize) {
                 } else {
                     (p.neutral_fill, p.text_secondary)
                 };
-                let (rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-                ui.painter().circle_filled(rect.center(), 11.0, fill);
+                let (rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+                ui.painter().circle_filled(rect.center(), 10.0, fill);
                 if i < current {
                     Icon::Check.paint(ui.painter(), rect.shrink(6.0), fg);
                 } else {
@@ -1540,7 +1703,7 @@ pub fn steps(ui: &mut Ui, names: &[String], current: usize) {
                 });
                 if i + 1 < names.len() {
                     ui.add_space(space::S);
-                    let (rect, _) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::hover());
+                    let (rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
                     ui.painter()
                         .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, p.border));
                     ui.add_space(space::S);
@@ -1597,7 +1760,7 @@ pub fn tab_strip(ui: &mut Ui, name: &str, tabs: &[&str], selected: &mut usize) -
     }
 
     group_node(ui, id, Role::TabList, name);
-    let height = CONTROL_HEIGHT + space::S;
+    let height = CONTROL_HEIGHT + space::XS;
     let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     ui.painter().hline(
         strip.x_range(),
@@ -1629,7 +1792,7 @@ pub fn tab_strip(ui: &mut Ui, name: &str, tabs: &[&str], selected: &mut usize) -
                     theme::semibold(theme::BODY_SIZE),
                     colour,
                 );
-                let size = vec2(bold.size().x + 2.0 * space::M, height);
+                let size = vec2(bold.size().x + 2.0 * BUTTON_PADDING, height);
                 let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
                 let response = ui.interact(rect, tab_id(i), Sense::click());
                 option_info(&response, Role::Tab, on, title);
@@ -1655,8 +1818,8 @@ pub fn tab_strip(ui: &mut Ui, name: &str, tabs: &[&str], selected: &mut usize) -
                 painter.galley(rect.center() - galley.size() / 2.0, galley, colour);
                 if on {
                     let bar = egui::Rect::from_min_max(
-                        egui::pos2(rect.left() + space::M, rect.bottom() - 3.0),
-                        egui::pos2(rect.right() - space::M, rect.bottom()),
+                        egui::pos2(rect.left() + BUTTON_PADDING, rect.bottom() - 2.0),
+                        egui::pos2(rect.right() - BUTTON_PADDING, rect.bottom()),
                     );
                     painter.rect_filled(bar, CornerRadius::same(2), p.accent);
                 }
@@ -1681,6 +1844,19 @@ pub fn toolbar_group_gap(ui: &mut Ui) {
     ui.add_space(space::TOOLBAR_GROUP_GAP - ui.spacing().item_spacing.x);
 }
 
+/// A thin upright line between two groups of a command bar's buttons, with
+/// [`space::TOOLBAR_GROUP_GAP`] round it.
+pub fn toolbar_separator(ui: &mut Ui) {
+    let p = theme::of(ui);
+    let gap = (space::TOOLBAR_GROUP_GAP - ui.spacing().item_spacing.x).max(0.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(2.0 * gap + 1.0, CONTROL_HEIGHT), Sense::hover());
+    ui.painter().vline(
+        rect.center().x,
+        rect.shrink2(vec2(0.0, 5.0)).y_range(),
+        secondary_border(p),
+    );
+}
+
 // --- Added for History's toolbar and long names --------------------------------------------
 
 /// What's left of a table cell less a pad at its right, as [`table`]'s cells have at their left:
@@ -1694,7 +1870,7 @@ fn right_padded(ui: &Ui) -> egui::Rect {
 }
 
 /// A [`status_chip`]'s glyph, in points.
-const CHIP_GLYPH: f32 = 12.0;
+const CHIP_GLYPH: f32 = 11.0;
 
 /// How wide a [`status_chip`] with `text` is, to keep room for it after something cut to fit.
 pub fn status_chip_width(ui: &Ui, text: &str) -> f32 {
@@ -1703,7 +1879,7 @@ pub fn status_chip_width(ui: &Ui, text: &str) -> f32 {
         egui::FontId::proportional(theme::SMALL_SIZE),
         Color32::WHITE,
     );
-    space::S * 2.0 + CHIP_GLYPH + space::XS + galley.size().x
+    CHIP_PADDING * 2.0 + CHIP_GLYPH + space::XS + galley.size().x
 }
 
 /// How wide a [`tag`] with `text` is.
@@ -1713,7 +1889,7 @@ pub fn tag_width(ui: &Ui, text: &str) -> f32 {
         egui::FontId::proportional(theme::SMALL_SIZE),
         Color32::WHITE,
     );
-    galley.size().x + 2.0 * space::S - 2.0
+    galley.size().x + 2.0 * 5.0
 }
 
 /// Runs `add` in what's left of the row less `room` points, kept for what follows it: a name
@@ -1746,8 +1922,10 @@ fn dropdown_text(ui: &Ui, label: Option<&str>, value: &str) -> (String, f32) {
     };
     let font = egui::TextStyle::Button.resolve(ui.style());
     let spacing = ui.spacing();
-    // The button's padding, the gap and the arrow round its text.
-    let chrome = 2.0 * spacing.button_padding.x + spacing.item_spacing.x + spacing.icon_width;
+    // The button's padding, the gap and the arrow round its text, and room for its frame's
+    // stroke and the text's own side bearings, which the sum alone cuts short at small sizes.
+    let chrome =
+        2.0 * spacing.button_padding.x + spacing.item_spacing.x + spacing.icon_width + 12.0;
     let whole = ui
         .painter()
         .layout_no_wrap(text.clone(), font, Color32::WHITE)

@@ -31,10 +31,10 @@ use super::backend::{Backend, Status, UiRequest, change_settings};
 use super::icons::Icon;
 use super::theme::{self, space};
 use super::widgets::{
-    InfoKind, TableColumn, TableState, Tone, card_frame, danger_button_filled, dialog_frame,
-    empty_state, flow, heading, icon_button, info_chip, leaving_room, message_bar, primary_button,
-    progress_chip, relative_time, secondary_button, secondary_button_with_icon, status_chip, table,
-    tag, tag_width, toggle, toolbar_group_gap,
+    InfoKind, TableColumn, TableState, Tone, card_frame, cell_status_chip, command_button,
+    danger_button_filled, dialog_frame, empty_state, flow, heading, icon_button, info_chip,
+    leaving_room, message_bar, path_label, primary_button_with_icon, progress_chip, relative_time,
+    secondary_button, small_toggle, table, table_frame, tag, tag_width, toolbar, toolbar_separator,
 };
 
 /// How often the tab looks for a changed settings file (an edit by hand, the CLI, the tray).
@@ -42,6 +42,8 @@ const RECHECK: Duration = Duration::from_secs(1);
 
 /// Under this width the table leaves out its Targets column.
 const NARROW_TABLE: f32 = 780.0;
+/// Under this width it leaves out its Schedule column too (the next run's hover text says it).
+const NARROWER_TABLE: f32 = 700.0;
 
 /// The table's columns, by what they show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,16 +53,17 @@ enum Col {
     Status,
     Last,
     Next,
+    Schedule,
     Targets,
     Actions,
 }
 
-/// The On and Actions columns' widths: a switch, and three icon buttons.
-const ON_WIDTH: f32 = 48.0;
-const ACTIONS_WIDTH: f32 = 104.0;
+/// The On and Actions columns' widths: a small switch, and three icon buttons.
+const ON_WIDTH: f32 = 44.0;
+const ACTIONS_WIDTH: f32 = 96.0;
 /// The Job column's narrowest when there's room, besides its mode's tag: it takes what the
 /// others leave.
-const JOB_LEAST: f32 = 200.0;
+const JOB_LEAST: f32 = 120.0;
 /// Its narrowest in a window too narrow for that.
 const JOB_FLOOR: f32 = 120.0;
 
@@ -73,10 +76,11 @@ impl Col {
             Col::Actions => (ACTIONS_WIDTH, ACTIONS_WIDTH),
             Col::Job => (0.0, 0.0),
             // Room for "Waiting its turn", the widest chip.
-            Col::Status => (136.0, 124.0),
-            Col::Last => (92.0, 76.0),
-            Col::Next => (190.0, 120.0),
-            Col::Targets => (150.0, 100.0),
+            Col::Status => (132.0, 128.0),
+            Col::Last => (84.0, 76.0),
+            Col::Next => (116.0, 96.0),
+            Col::Schedule => (136.0, 100.0),
+            Col::Targets => (200.0, 120.0),
         }
     }
 
@@ -88,6 +92,7 @@ impl Col {
             Col::Status => "jobs-col-status",
             Col::Last => "jobs-col-last",
             Col::Next => "jobs-col-next",
+            Col::Schedule => "jobs-schedule",
             Col::Targets => "jobs-col-targets",
             Col::Actions => "jobs-col-actions",
         };
@@ -315,19 +320,20 @@ impl JobsTab {
         }
     }
 
-    /// The page's actions: a new job, and running every job that's on.
+    /// The page's actions: a new job and running every job that's on, then exporting and
+    /// importing jobs.
     fn command_bar(&mut self, ui: &mut Ui, editable: bool) {
-        ui.horizontal(|ui| {
+        toolbar(ui, |ui| {
             if ui
                 .add_enabled_ui(editable, |ui| {
-                    ui.add_space(0.0);
-                    primary_button(ui, &tr("jobs-new"))
+                    primary_button_with_icon(ui, Icon::Add, &tr("jobs-new"))
                 })
                 .inner
                 .clicked()
             {
                 self.edit(None);
             }
+            ui.add_space(space::XS);
             let enabled: Vec<String> = self
                 .jobs()
                 .iter()
@@ -336,24 +342,28 @@ impl JobsTab {
                 .collect();
             if ui
                 .add_enabled_ui(!enabled.is_empty(), |ui| {
-                    secondary_button_with_icon(ui, Icon::Play, &tr("jobs-run-all"))
+                    command_button(ui, Icon::Play, &tr("jobs-run-all"))
                 })
                 .inner
                 .clicked()
             {
                 self.backend.send(UiRequest::Run(enabled));
             }
-            toolbar_group_gap(ui);
+            toolbar_separator(ui);
             let any = !self.jobs().is_empty();
             if ui
-                .add_enabled_ui(any, |ui| secondary_button(ui, &tr("jobs-export")))
+                .add_enabled_ui(any, |ui| {
+                    command_button(ui, Icon::Export, &tr("jobs-export"))
+                })
                 .inner
                 .clicked()
             {
                 self.open_export(None);
             }
             if ui
-                .add_enabled_ui(editable, |ui| secondary_button(ui, &tr("jobs-import")))
+                .add_enabled_ui(editable, |ui| {
+                    command_button(ui, Icon::Import, &tr("jobs-import"))
+                })
                 .inner
                 .clicked()
             {
@@ -402,15 +412,21 @@ impl JobsTab {
             Col::Status,
             Col::Last,
             Col::Next,
+            Col::Schedule,
             Col::Targets,
             Col::Actions,
         ]
         .into_iter()
-        .filter(|c| *c != Col::Targets || ui.available_width() >= NARROW_TABLE)
+        .filter(|c| match c {
+            Col::Targets => ui.available_width() >= NARROW_TABLE,
+            Col::Schedule => ui.available_width() >= NARROWER_TABLE,
+            _ => true,
+        })
         .collect();
+        let schedule_shown = cols.contains(&Col::Schedule);
         // Job takes what the others leave, at least JOB_LEAST beside its tag: short of that,
         // the others are cut towards their least, together.
-        let room = ui.available_width() - 2.0 * space::S - 2.0;
+        let room = ui.available_width() - 2.0;
         let tag_room = [
             (Mode::Versioned, false),
             (Mode::Versioned, true),
@@ -443,9 +459,8 @@ impl JobsTab {
         let mut delete = None;
         let mut export = None;
         let p = theme::of(ui);
-        let height = ui.available_height() - 2.0 * space::M - 2.0;
-        let response = card_frame(p)
-            .inner_margin(egui::Margin::symmetric(space::S as i8, space::S as i8))
+        let height = ui.available_height() - 4.0;
+        let response = table_frame(p)
             .show(ui, |ui| {
                 // The wide and the narrow table keep their column widths apart.
                 ui.push_id(cols.len(), |ui| {
@@ -464,7 +479,7 @@ impl JobsTab {
                                 Col::On => {
                                     let mut on = job.enabled;
                                     let response = ui
-                                        .add_enabled_ui(editable, |ui| toggle(ui, &mut on))
+                                        .add_enabled_ui(editable, |ui| small_toggle(ui, &mut on))
                                         .inner
                                         .accessible_name(tr!(
                                             "jobs-enabled-for",
@@ -494,17 +509,13 @@ impl JobsTab {
                                 }
                                 Col::Status => status_cell(ui, job, status),
                                 Col::Last => last_cell(ui, job, status, now),
-                                Col::Next => next_cell(ui, job, &app, status, now),
+                                Col::Next => next_cell(ui, job, &app, status, now, !schedule_shown),
+                                Col::Schedule => schedule_cell(ui, job, &app),
                                 Col::Targets => {
-                                    let text = targets_text(job);
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(&text).color(p.text_secondary),
-                                        )
-                                        .truncate(),
-                                    );
+                                    path_label(ui, &targets_text(job));
                                 }
                                 Col::Actions => {
+                                    ui.spacing_mut().item_spacing.x = 2.0;
                                     if let Some(action) = row_actions(ui, job, editable, status) {
                                         match action {
                                             RowAction::Run => self
@@ -727,11 +738,11 @@ fn status_cell(ui: &mut Ui, job: &Job, status: &Status) {
                 reason = last.reason.as_deref().unwrap_or("")
             ));
         }
-        status_chip(ui, Tone::Warning, &tr("jobs-overdue")).on_hover_text(hint.trim_end());
+        cell_status_chip(ui, Tone::Warning, &tr("jobs-overdue")).on_hover_text(hint.trim_end());
     } else {
         match status.last(&job.name) {
             Some(last) => {
-                let chip = status_chip(ui, tone(last.outcome), &outcome_text(last.outcome));
+                let chip = cell_status_chip(ui, tone(last.outcome), &outcome_text(last.outcome));
                 if let Some(reason) = &last.reason
                     && last.outcome != Outcome::Ok
                 {
@@ -739,7 +750,7 @@ fn status_cell(ui: &mut Ui, job: &Job, status: &Status) {
                 }
             }
             None => {
-                status_chip(ui, Tone::Neutral, &tr("result-never-run"))
+                cell_status_chip(ui, Tone::Neutral, &tr("result-never-run"))
                     .on_hover_text(tr("jobs-never-run-hint"));
             }
         }
@@ -760,30 +771,54 @@ fn last_cell(ui: &mut Ui, job: &Job, status: &Status, now: DateTime<Utc>) {
     }
 }
 
-/// When it next runs, and under it how it's scheduled and what runs it.
-fn next_cell(ui: &mut Ui, job: &Job, app: &AppSettings, status: &Status, now: DateTime<Utc>) {
+/// When it next runs, with the exact time in its hover text (and how it's scheduled, when the
+/// Schedule column is left out: `with_schedule`).
+fn next_cell(
+    ui: &mut Ui,
+    job: &Job,
+    app: &AppSettings,
+    status: &Status,
+    now: DateTime<Utc>,
+    with_schedule: bool,
+) {
     let p = theme::of(ui);
     let next = next_run(job, app, status, now);
-    if next == NextRun::Manual {
-        ui.label(RichText::new(tr("jobs-schedule-none")).color(p.text_secondary))
-            .on_hover_text(next.text(now));
-        return;
+    let mut hint = match next {
+        NextRun::At(at) => local_text(&at),
+        NextRun::Manual => next.text(now),
+        _ => String::new(),
+    };
+    if with_schedule && next != NextRun::Manual {
+        hint = format!("{hint}\n{}", schedule_text(job, app));
     }
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let label = ui.add(egui::Label::new(next.text(now)).truncate());
-        if let NextRun::At(at) = next {
-            label.on_hover_text(local_text(&at));
+    let text = if next == NextRun::Manual {
+        RichText::new("–").color(p.text_secondary)
+    } else {
+        RichText::new(next.text(now))
+    };
+    let label = ui.add(egui::Label::new(text).truncate());
+    let hint = hint.trim();
+    if !hint.is_empty() {
+        label.on_hover_text(hint);
+    }
+}
+
+/// How it's scheduled ("daily 02:30"), and what runs it (the built-in timer or Task Scheduler)
+/// in its hover text.
+fn schedule_cell(ui: &mut Ui, job: &Job, app: &AppSettings) {
+    let p = theme::of(ui);
+    match &job.schedule {
+        Some(schedule) => {
+            ui.add(egui::Label::new(schedule.to_string()).truncate())
+                .on_hover_text(schedule_text(job, app));
         }
-        ui.add(
-            egui::Label::new(
-                RichText::new(schedule_text(job, app))
-                    .small()
-                    .color(p.text_secondary),
-            )
-            .truncate(),
-        );
-    });
+        None => {
+            ui.add(
+                egui::Label::new(RichText::new(tr("jobs-schedule-none")).color(p.text_secondary))
+                    .truncate(),
+            );
+        }
+    }
 }
 
 /// The job's targets, short: their names, or "BACKUP:Replica" and `\\nas\share` paths.

@@ -179,6 +179,70 @@ fn step_until<S>(harness: &mut Harness<'_, S>, mut done: impl FnMut(&Harness<'_,
 }
 
 #[test]
+fn a_narrow_window_scrolls_the_tasks_table_sideways_to_its_last_columns() {
+    // Narrower than the table's columns, as the page is at the window's least width.
+    const WIDTH: f32 = 600.0;
+    let f = Fixture::new("narrow");
+    let mut harness = Harness::builder()
+        .with_size([WIDTH, 1600.0])
+        .with_context_setup(|ctx| {
+            replica::ui::fonts::install(ctx).unwrap();
+            replica::ui::style(ctx);
+        })
+        .build_ui_state(
+            |ui, tab: &mut SettingsTab| tab.ui(ui),
+            SettingsTab::new(Arc::clone(&f.backend) as Arc<dyn Backend>),
+        );
+    // Each step waits for what it needs, never a fixed few frames: the tab, then its tasks
+    // (read from Task Scheduler) laid out.
+    step_until(&mut harness, |h| {
+        h.query_by_role_and_label(egui::accesskit::Role::Tab, "Schedules")
+            .is_some()
+    });
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Tab, "Schedules")
+        .click();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Delete the task docs").is_some()
+            && h.query_by_label("daily 02:30").is_some()
+    });
+    settle(&mut harness);
+    let delete = |h: &Harness<'_, SettingsTab>| h.get_by_label("Delete the task docs").rect();
+    assert!(
+        delete(&harness).left() > WIDTH,
+        "past the edge at first: {:?}",
+        delete(&harness)
+    );
+    // A sideways wheel over the table (the harness's own input, not the screen's) brings the
+    // last columns into view.
+    let over = harness.get_by_label("daily 02:30").rect().center();
+    harness.event(egui::Event::PointerMoved(over));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(-600.0, 0.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: egui::Modifiers::NONE,
+    });
+    step_until(&mut harness, |h| delete(h).right() <= WIDTH);
+    settle(&mut harness);
+    harness.get_by_label("Delete the task docs").click();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Delete the task docs?").is_some()
+    });
+}
+
+/// Runs frames until nothing more is asked for (a scroll's last frames, a list laid out), for
+/// at most 10 s: a condition, not a count of frames.
+fn settle<S>(harness: &mut Harness<'_, S>) {
+    let until = Instant::now() + Duration::from_secs(10);
+    while harness.try_run().is_err() {
+        assert!(Instant::now() < until, "never settled");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
 fn the_tasks_view_lists_flags_orphans_turns_off_and_deletes() {
     let f = Fixture::new("view");
     let mut harness = f.harness();

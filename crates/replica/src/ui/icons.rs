@@ -48,6 +48,10 @@ pub enum Icon {
     Edit,
     /// A circling arrow, for looking again.
     Refresh,
+    /// An arrow up out of a tray, for exporting.
+    Export,
+    /// An arrow down into a tray, for importing.
+    Import,
 }
 
 impl Icon {
@@ -199,6 +203,16 @@ impl Icon {
                     stroke,
                 );
                 line(&[(0.7, 0.04), (0.78, 0.22), (0.58, 0.25)]);
+            }
+            Icon::Export | Icon::Import => {
+                // The tray, open at the top.
+                line(&[(0.1, 0.58), (0.1, 0.9), (0.9, 0.9), (0.9, 0.58)]);
+                line(&[(0.5, 0.08), (0.5, 0.66)]);
+                if self == Icon::Export {
+                    line(&[(0.28, 0.3), (0.5, 0.08), (0.72, 0.3)]);
+                } else {
+                    line(&[(0.28, 0.44), (0.5, 0.66), (0.72, 0.44)]);
+                }
             }
             Icon::Empty => {
                 line(&[

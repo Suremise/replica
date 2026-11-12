@@ -23,10 +23,10 @@ use super::icons::Icon;
 use super::jobs::outcome_text;
 use super::theme::{self, space};
 use super::widgets::{
-    InfoKind, Sort, TableColumn, TableState, Tone, card_frame, dropdown, dropdown_value,
-    empty_state, error_text, icon_button, info_bar, info_row, leaving_room, quiet_text,
-    secondary_button, section_card_with_actions, size_text, status_chip, status_chip_width, table,
-    toolbar_group_gap,
+    InfoKind, Sort, TableColumn, TableState, Tone, cell_status_chip, dropdown, dropdown_value,
+    empty_state, error_text, icon_button, info_bar, info_row, leaving_room, quiet_mono, quiet_path,
+    quiet_text, secondary_button, section_card_with_actions, size_text, status_chip,
+    status_chip_width, table, table_frame, toolbar_group_gap,
 };
 use crate::cli::duration_text;
 
@@ -44,7 +44,7 @@ const SEARCH_MIN_WIDTH: f32 = 160.0;
 const JOB_LEAST: f32 = 150.0;
 /// Every column's least but Started's: the table scrolls sideways only in a window too narrow
 /// for them (it fits at the first-run size).
-const TABLE_LEAST: f32 = JOB_LEAST + 144.0 + 166.0 + 84.0 + 64.0 + 80.0;
+const TABLE_LEAST: f32 = JOB_LEAST + 160.0 + 172.0 + 96.0 + 64.0 + 84.0;
 
 /// A run or a test restore.
 #[derive(Debug, Clone, PartialEq)]
@@ -366,7 +366,7 @@ impl HistoryTab {
             result: None,
             period: Period::Any,
             search: String::new(),
-            started_width: 130.0,
+            started_width: 124.0,
             table: TableState::default(),
             selected: None,
             message: None,
@@ -480,7 +480,7 @@ impl HistoryTab {
             .show(ui, |ui| {
                 ui.label(RichText::new(summary_line(&shown)).color(theme::of(ui).text_secondary));
                 ui.add_space(space::S);
-                card_frame(theme::of(ui)).show(ui, |ui| {
+                table_frame(theme::of(ui)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     // The columns' room, scrolled sideways in a narrow window, with a solid
                     // scroll bar so it's plain there's more.
@@ -542,14 +542,17 @@ impl HistoryTab {
             TableColumn::new(tr("history-col-job"), None)
                 .sortable()
                 .at_least(JOB_LEAST),
-            TableColumn::new(tr("history-col-target"), Some(144.0)),
+            TableColumn::new(tr("history-col-target"), Some(160.0)),
             // Room for "Partly done · 12 skipped".
-            TableColumn::new(tr("history-col-result"), Some(166.0)).sortable(),
-            TableColumn::new(tr("history-col-duration"), Some(84.0)).sortable(),
+            TableColumn::new(tr("history-col-result"), Some(172.0)).sortable(),
+            // Room for "1 min 58 s" in monospace.
+            TableColumn::new(tr("history-col-duration"), Some(96.0))
+                .sortable()
+                .right_aligned(),
             TableColumn::new(tr("history-col-files"), Some(64.0))
                 .sortable()
                 .right_aligned(),
-            TableColumn::new(tr("history-col-size"), Some(80.0))
+            TableColumn::new(tr("history-col-size"), Some(84.0))
                 .sortable()
                 .right_aligned(),
         ];
@@ -585,20 +588,20 @@ impl HistoryTab {
                         }
                     }
                     2 => {
-                        quiet_text(ui, &entry.target_text(), None);
+                        quiet_path(ui, &entry.target_text(), None);
                     }
                     3 => {
-                        status_chip(ui, outcome_tone(entry.outcome()), &entry.result_text());
+                        cell_status_chip(ui, outcome_tone(entry.outcome()), &entry.result_text());
                     }
                     4 => {
-                        quiet_text(ui, &duration_text(entry.duration()), None);
+                        quiet_mono(ui, &duration_text(entry.duration()), None);
                     }
                     5 => {
-                        quiet_text(ui, &entry.files().to_string(), None);
+                        quiet_mono(ui, &entry.files().to_string(), None);
                     }
                     _ => {
                         let size = entry.bytes().map_or_else(|| "—".to_owned(), size_text);
-                        quiet_text(ui, &size, None);
+                        quiet_mono(ui, &size, None);
                     }
                 }
             },

@@ -901,7 +901,8 @@ own constants (`shell.rs`, `menu.rs`, `status_bar.rs`), so the pages' look (`the
   hover text (and still its name for a screen reader). A hairline divides it from the page.
 - Over the page, a slim header: the title (18 semibold, read as a heading) with the line saying
   what the page is for beside it in secondary text (`page-*-subtitle`), 14 above it and under
-  it. The page is at most 880 points wide, 20 from the sidebar and the window's edge.
+  it. The page is at most 1040 points wide (`theme::MAX_CONTENT_WIDTH`), 20 from the sidebar
+  and the window's edge.
 - The sidebar's header is the app icon (16 points) and "Replica" at 13 semibold. `build.rs`
   decodes the icon's 20, 32, 40, 48 and 64 px PNGs from `assets/icon/replica.ico` to raw RGBA
   (`ui::app_icon` draws the one sharp at the display's scale), so the window decodes nothing
@@ -922,27 +923,36 @@ own constants (`shell.rs`, `menu.rs`, `status_bar.rs`), so the pages' look (`the
   time (`ui/fonts.rs`): no font ships. Semibold is a family of its own (`fonts::SEMIBOLD`): the
   variable font at `wght` 600, or Segoe UI Semibold. Monospace is Cascadia Mono, then Consolas.
 
-**The look (`ui/theme.rs`)**, modelled on Windows 11 Settings:
+**The look (`ui/theme.rs`)**: compact and quiet, as a technical tool's window is (Explorer's
+details view, a backup console), not Windows 11 Settings' roomy rows (the first look, which read
+as "a bit like a hobby project"):
 - Two palettes, `theme::LIGHT` and `theme::DARK`, set as egui's two styles by `theme::install`
   (`ui::style`). egui's theme preference stays "system", so the window follows Windows' light or
   dark mode and switches while it runs. Widgets that draw their own colours take them from
   `theme::of(ui)`.
-- Neutral greys, a raised card with a hairline border, a secondary text colour; the accent is
-  Replica's teal (#0E7490, lighter in dark mode); status colours: green ok, red failed, amber
-  skipped/overdue/partly, grey not run.
+- Neutral greys, a raised card with a hairline border, a secondary text colour; a table's
+  header tint (`header`) and its hairlines (`grid`); the accent is Replica's teal (#0E7490,
+  lighter in dark mode), kept for the main action, links, selection and progress; status
+  colours: green ok, red failed, amber skipped/overdue/partly, grey not run.
 - **Every pair of text and background passes WCAG AA** (4.5:1; 3:1 for glyphs, outlines and the
   focus ring): `theme::tests` computes each ratio from the palettes, so a colour change that
   fails is caught.
-- Type: page title 24 semibold (`TextStyle::Heading`), section 16 semibold
-  (`theme::section_style()`), body 14, secondary 12. Spacing 4/8/12/16/24/32/40
-  (`theme::space`), controls 32 high, 6-point corners on cards and 4 on controls.
-- **Where the spacing goes (roomier after the first layout proved "a bit cramped")**, as named
-  tokens in `theme::space`: page margins 32 (`PAGE_MARGIN`), 40 between the full sidebar and
-  the page (`SIDEBAR_GAP`), 24 under a page's header (`UNDER_HEADER`), 16 between cards
-  (`CARD_GAP`), 20 inside a card (`CARD_PADDING`), 12 above and below a setting row's contents
-  (`ROW_PADDING`, and at least 52 high with a description: `ROW_MIN_HEIGHT`), 8 between a
-  toolbar's controls and 12 between its groups (`TOOLBAR_GAP`, `TOOLBAR_GROUP_GAP`), and the
-  sidebar's items 40 high, 4 apart (`NAV_ITEM_HEIGHT`, `NAV_ITEM_GAP`).
+- Type: page title 20 semibold (`TITLE_SIZE`, `TextStyle::Heading`), section 14 semibold
+  (`theme::section_style()`), body 13, secondary 12, and monospace 12 (`MONO_SIZE`: Cascadia
+  Mono, else Consolas) for paths, targets, repository locations, snapshot IDs and the numbers
+  in lists. Segoe UI's figures are tabular already, so times line up in proportional text.
+  Spacing 4/8/12/16/24/32/40 (`theme::space`), controls 28 high, 4-point corners on cards and 3
+  on controls. A page's content is at most 1040 points wide (`MAX_CONTENT_WIDTH`): room for a
+  table's columns.
+- **Where the spacing goes (compact)**, as named tokens in `theme::space`: page margins 20
+  (`PAGE_MARGIN`), 24 between the full sidebar and the page (`SIDEBAR_GAP`), 12 under a page's
+  header (`UNDER_HEADER`), 12 between cards (`CARD_GAP`), 12 inside a card (`CARD_PADDING`), 6
+  above and below a setting row's contents (`ROW_PADDING`, and at least 40 high with a
+  description: `ROW_MIN_HEIGHT`), 4 between a toolbar's controls and 8 either side of a group's
+  separator (`TOOLBAR_GAP`, `TOOLBAR_GROUP_GAP`), a table's rows 5 above and below their
+  tallest cell and at least 30 high under a 28-point header (`TABLE_ROW_PADDING`,
+  `TABLE_ROW_MIN_HEIGHT`, `TABLE_HEADER_HEIGHT`), and the sidebar's items 32 high, 2 apart
+  (`NAV_ITEM_HEIGHT`, `NAV_ITEM_GAP`).
 - The widget with the keyboard focus gets a 2-point ring (`theme::paint_focus`, once a frame).
 
 **The components (`ui/widgets.rs`)**, each named for a screen reader:
@@ -953,28 +963,36 @@ Windows' own settings, the row *is* its control for a screen reader: the control
 the label and described by the description, and the text beside it is painted, not read a
 second time. `info_row` is the same layout for a control that keeps its own name (a chip, a
 link), with the text read beside it, and `path_row` an `info_row` with a `path_field`. Then
-`primary_button`,
-`secondary_button`, `danger_button` (a secondary button with red text and an optional icon),
+`primary_button` (and `primary_button_with_icon`, a command bar's main action),
+`command_button` (a command bar's flat button: an icon in the accent and its text, filled only
+when hovered), `secondary_button`, `danger_button` (a secondary button with red text and an optional icon),
 `danger_button_filled` (only for a confirmation's last destructive step: "Delete", "Remove all",
 "Discard changes", and the editor's "Use a mirror anyway" and "Replace it anyway"),
-`icon_button`, `toggle` (an on/off switch, read as a
-check box), `segmented` (a few options side by side, read as a radio group),
-`relative_time` ("in 9 h", "2 h ago"), `status_chip` (`Tone`: each with its own glyph, so not by colour alone),
+`icon_button` (24 points, flat, its name in its hover text: a row's actions), `toggle` (an
+on/off switch, read as a check box; `small_toggle` in a table's rows), `segmented` (a few options side by side, read as a radio group),
+`relative_time` ("in 9 h", "2 h ago"), `status_chip` (`Tone`: each with its own glyph, so not
+by colour alone; a small, squarish chip; `cell_status_chip` in a table makes a column's chips
+one width, up to `CELL_CHIP_WIDTH`),
 `path_field` (cut in the middle, full path in its hover text and its name, a copy button),
 `empty_state`, `info_bar` (read as a status, or an alert for an error) and `table`.
-`table` is over `egui_extras`' `TableBuilder`: header (a click on a sortable column's title
-sorts; the caller sorts its rows by `TableState::sort`), striped rows, resizable columns, row
-selection, an empty state. Like a Windows list it is one keyboard stop: the arrow keys, Home
+`table` is over `egui_extras`' `TableBuilder`: a tinted header with a rule under it and thin
+lines between its titles (a click on a sortable column's title sorts; the caller sorts its rows
+by `TableState::sort`), a hairline under each row, resizable columns, row selection, an empty
+state; `table_frame` is the card round one, with no padding, so the header reaches its border.
+Its cells' text is `quiet_text`, `quiet_mono` (an ID, a number) or `quiet_path` (a path or a
+target: monospace, cut in the middle, whole on hover); a column of numbers is `right_aligned`. Like a Windows list it is one keyboard stop: the arrow keys, Home
 and End move the selection, Enter activates; a screen reader reads a list box and its
 selected row. Also: `secondary_button_with_icon`, `tag` (a grey pill for a kind),
-`removable_chip`, `copy_field` (monospace text with a Copy button), `progress_chip` (a track
-across the chip, filled as far as it's done, its text over both), `info_chip` (a live state in
+`removable_chip`, `copy_field` (monospace text with a Copy button), `progress_chip` (its text,
+"Running, 42%", over a slim bar filled in the accent as far as it's done, as wide as the
+column's chips), `info_chip` (a live state in
 the info colours), `message_bar` (an info
 bar whose group is named by its text's own node, so the message is read once) and `steps`
 (numbered steps, the current one in the accent). Then `tab_strip` (tabs under a
 page's header, the chosen one semibold with the accent's underline; a click, the arrow keys
 (wrapping round), Home and End choose one; read as a tab list of tabs), and `toolbar` with
-`toolbar_group_gap` (controls 8 apart, groups 12), and `plain_card` (a card with no title, for one whose title would only repeat its tab's name). A `table`'s rows are as tall as its tallest cell seen, plus 10 above and below, and never under 40 (a two-line cell gives about 54); each cell is centred in its row, so a one-line cell sits level with a two-line one. Every page (Jobs, History,
+`toolbar_separator` (a thin upright line between groups of command buttons) or
+`toolbar_group_gap` (room alone, between groups of other controls), and `plain_card` (a card with no title, for one whose title would only repeat its tab's name). A `table`'s rows are as tall as its tallest cell seen, plus 5 above and below, and never under 30; each cell is centred in its row, so a one-line cell sits level with a two-line one. Every page (Jobs, History,
 Restore, Settings, About) is built from these.
 - **How the table takes clicks:** its cells have no spacing between them (each pads
   itself), so a click anywhere on a row reaches it, except on a column's border, where
@@ -994,7 +1012,9 @@ Restore, Settings, About) is built from these.
 **The screenshot harness (`crates/replica/tests/ui_shots.rs`)** renders named screens
 with `egui_kittest`'s wgpu renderer (a dev-dependency only, with `image` for the PNGs) and
 writes them to the git-ignored `target/ui-shots/<folder>/`: each in light and dark, at 100% and
-150%, at 1200 and 800 points wide (`<screen>-<theme>-<normal|narrow>-<100|150>.png`). Screens:
+150%, at 1200 points wide and at the window's least width (720, `geometry::MIN_SIZE`; a
+`bounds.txt` beside them lists every accessibility node, whatever its role, that reaches past
+that width: none but the tables that scroll sideways and a text field's own scrolled text) (`<screen>-<theme>-<normal|narrow>-<100|150>.png`). Screens:
 `gallery`, every component and icon (`tests/ui_shots/gallery.rs`, test only), and the shell
 with each page (`jobs`, `history`, `restore`, `settings`, `about`) on a temp app folder with two
 jobs; the whole Settings page with Task Scheduler's tasks (`settings-tasks`), none
@@ -1021,16 +1041,18 @@ cargo test -p replica --test ui_shots -- --ignored
 A change that adds a screen adds it to `screens()` in that file.
 
 **The Jobs tab (`ui/jobs/`):**
-- A command bar ("New job", "Run all") over a `widgets::table` of the jobs: on/off (a toggle),
+- A command bar ("New job" in the accent, then flat "Run all" | "Export…", "Import…") over a
+  `widgets::table` of the jobs, a row a line: on/off (a `small_toggle`),
   the name with its mode as a `tag`, the last result as a status chip (why it failed or was
   skipped in its hover text: `backend::LastRun::reason`, the run's error else the first target's
   reason; while it runs, a `progress_chip`; waiting its turn, an `info_chip`), the last run and
   the next run said as Settings says times (`widgets::relative_time`: "9 h ago", "in 8 h"; a
   next run beyond 12 hours as "Tomorrow 02:30", "Sat 10:00" or the date, `jobs::NextRun`), each
-  with the exact time in its hover text, the schedule and what runs it under the next run, and
-  the targets (left out under 780 points). Sortable by name, status and last run; double-click or Enter opens the editor.
+  with the exact time in its hover text, the schedule ("daily 02:30", with what runs it, the
+  built-in timer or Task Scheduler, in its hover text; left out under 700 points, where the
+  next run's hover text says it), and the targets (`quiet_path`; left out under 780 points). Sortable by name, status and last run; double-click or Enter opens the editor.
   Each row has Run now (Stop while it runs, with the progress in its status cell), Edit, and a
-  ⋯ menu with Delete. With no jobs, an empty state with "New job". "Run selected" went with
+  ⋯ menu with Export… and Delete, as small flat icon buttons. With no jobs, an empty state with "New job". "Run selected" went with
   the old list's tick boxes: each row's Run now and "Run all" remain.
 - Every change re-reads `settings.toml`, applies itself, runs core's validation over all the
   jobs, saves, and sends `Reload`. Nothing is saved while the file can't be read or the app's

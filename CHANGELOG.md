@@ -14,6 +14,10 @@ All notable changes to Replica are recorded here. The format is based on
   it; `show_status_bar` in `settings.toml` remembers that), and a compact sidebar with Jobs,
   History and Restore. Settings and About are now in the Tools and Help menus. File > Exit Replica
   quits Replica as the tray's Quit does.
+- The window's pages have a compact, quieter look: smaller type, denser tables with a tinted
+  header and hairlines between rows, flat command buttons, squarer status chips with a slim bar
+  while a job runs, and paths, targets, snapshot IDs and sizes in monospace. A job's schedule has
+  a column of its own, with what runs it (the built-in timer or Task Scheduler) on hover.
 
 ## [0.2.0] - 2026-11-02
 

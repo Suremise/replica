@@ -1,7 +1,8 @@
 //! The screenshot harness: renders named screens with `egui_kittest`'s wgpu renderer
 //! and writes PNGs to the git-ignored `target/ui-shots/<name>/`, for reviewing the window's
 //! look without running it. Each screen is shot in light and dark, at 100% and 150%, at a
-//! normal and a narrow (800 points) width: `<screen>-<theme>-<width>-<scale>.png`.
+//! normal and a narrow width, the window's least (`geometry::MIN_SIZE`, 720 points):
+//! `<screen>-<theme>-<width>-<scale>.png`.
 //!
 //! It's ignored by a plain `cargo test`; run it with
 //!
@@ -76,8 +77,13 @@ impl Variant {
         all
     }
 
+    /// Narrow is the window's least width, so a narrow shot shows nothing is cut there.
     fn width(self) -> f32 {
-        if self.narrow { 800.0 } else { 1200.0 }
+        if self.narrow {
+            replica::ui::geometry::MIN_SIZE[0]
+        } else {
+            1200.0
+        }
     }
 
     fn file(self, screen: &str) -> String {
@@ -451,6 +457,8 @@ fn busy_fixture_with(edit: impl FnOnce(&mut Status)) -> Fixture {
 const LONG_JOB: &str = "documents-and-every-project-folder-from-the-old-laptop-2026";
 const LONG_JOB_2: &str = "photos-from-every-phone-since-2012-including-the-old-iphone";
 const LONG_LABEL: &str = "WD-MyPassport-4TB-Backup";
+/// The mirror's drive: a mirror can't go where another job's repository is (core's check).
+const LONG_LABEL_2: &str = "Seagate-Expansion-8TB-Photos";
 const LONG_UNC: &str =
     r"\\nas-backup-server.home.lan\backups\replica\documents-and-every-project-folder\2026";
 const LONG_TAG: &str = "before-moving-everything-to-the-new-laptop-october-2026";
@@ -478,7 +486,7 @@ fn long_fixture(data: impl FnOnce(Faked) -> Faked) -> Fixture {
             "every 6h",
             Mode::Mirror,
             r"D:\Photos",
-            LONG_LABEL,
+            LONG_LABEL_2,
         ),
         job(
             "Music",
@@ -880,6 +888,7 @@ fn save<S>(harness: &mut Harness<'_, S>, scale: f32, path: &Path) {
             break;
         }
     }
+    report_bounds(harness, path);
     let image = harness.render().expect("rendered with wgpu");
     let m = (MARGIN * scale).round() as u32;
     let (w, h) = image.dimensions();
@@ -887,6 +896,75 @@ fn save<S>(harness: &mut Harness<'_, S>, scale: f32, path: &Path) {
         .to_image()
         .save(path)
         .unwrap();
+}
+
+/// For a narrow shot (the window's least width), adds a line to `bounds.txt` beside it for
+/// each node in the accessibility tree, whatever its role, that reaches past the window's right
+/// edge: something cut off there, or in a table that scrolls sideways on purpose (History's,
+/// Scheduled tasks'). Every node counts, text and the tables' list boxes too, so a table or
+/// a card that grows past the edge shows even where its cells have no node of their own.
+/// "none" when there isn't one, so every narrow shot is accounted for.
+fn report_bounds<S>(harness: &Harness<'_, S>, path: &Path) {
+    use egui_kittest::kittest::{By, NodeT, Queryable};
+    use std::io::Write;
+    let name = path.file_name().unwrap().to_string_lossy().into_owned();
+    if !name.contains("-narrow-") {
+        return;
+    }
+    let viewport = harness.ctx.content_rect();
+    let right = viewport.right() - MARGIN + 0.5;
+    let ppp = harness.ctx.pixels_per_point();
+    // A node's rect in points, if it has one (a group may not).
+    let rect = |n: &egui_kittest::Node<'_>| {
+        n.accesskit_node().bounding_box().map(|b| {
+            eframe::egui::Rect::from_min_max(
+                eframe::egui::pos2(b.x0 as f32 / ppp, b.y0 as f32 / ppp),
+                eframe::egui::pos2(b.x1 as f32 / ppp, b.y1 as f32 / ppp),
+            )
+        })
+    };
+    let mut lines: Vec<String> = harness
+        .query_all(By::new().include_labels())
+        // The harness's own root, which takes in its margin, isn't the window's content.
+        .filter(|n| rect(n).is_some_and(|r| r != viewport && r.right() > right))
+        .map(|n| {
+            let r = rect(&n).unwrap();
+            // A text field's own text is as long as it is and scrolls inside the field.
+            let in_field = n.accesskit_node().parent().is_some_and(|p| {
+                matches!(
+                    p.role(),
+                    eframe::egui::accesskit::Role::TextInput
+                        | eframe::egui::accesskit::Role::MultilineTextInput
+                )
+            });
+            let note = if in_field {
+                ": a text field's text, scrolled inside the field"
+            } else {
+                ""
+            };
+            format!(
+                "{name}: {:?} {:?} spans x {:.0}..{:.0}, y {:.0}..{:.0} (the window ends at {:.0}){note}",
+                n.accesskit_node().role(),
+                n.accesskit_node().label().unwrap_or_default(),
+                r.left() - MARGIN,
+                r.right() - MARGIN,
+                r.top() - MARGIN,
+                r.bottom() - MARGIN,
+                right - MARGIN - 0.5,
+            )
+        })
+        .collect();
+    if lines.is_empty() {
+        lines.push(format!("{name}: none"));
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path.with_file_name("bounds.txt"))
+        .unwrap();
+    for line in lines {
+        writeln!(file, "{line}").unwrap();
+    }
 }
 
 /// Shoots a screen in a variant to a file.
@@ -1354,6 +1432,66 @@ fn shell_harness_at(fixture: &Fixture, width: f32) -> Harness<'_, Shell> {
 }
 
 #[test]
+fn restore_fits_the_window_at_its_least_width() {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{By, NodeT, Queryable};
+    // The window's least width; tall, as the page scrolls up and down anyway, so the steps'
+    // clicks reach the tree below the table.
+    let width = replica::ui::geometry::MIN_SIZE[0];
+    let height = 1500.0;
+    let fixture = Fixture::with_data(Faked::with_snapshots);
+    let mut shell = fixture.shell(Tab::Restore);
+    shell.restore.job = Some("Documents".into());
+    let mut harness = Harness::builder()
+        .with_size([width, height])
+        .with_max_steps(64)
+        .with_context_setup(|ctx| {
+            replica::ui::fonts::install(ctx).unwrap();
+            replica::ui::style(ctx);
+        })
+        .build_ui_state(|ui, shell: &mut Shell| shell.show(ui), shell);
+    // The snapshots listed (each step waits for what it shows), one chosen, its tree open.
+    restore_steps(&mut harness, 2);
+
+    // The snapshot table, its last column's title and its rows are inside the window.
+    let table = harness
+        .get_by_role_and_label(Role::ListBox, "Snapshot")
+        .rect();
+    assert!(table.right() <= width, "the snapshot table: {table:?}");
+    for id in harness.get_all_by_label("ID") {
+        assert!(id.rect().right() <= width, "the ID column: {:?}", id.rect());
+    }
+    let row = harness.get_by_label_contains("4f2a91c0");
+    assert!(row.rect().right() <= width, "a row: {:?}", row.rect());
+
+    // Nothing on the page reaches past the window's edge (the cards round the table, the
+    // tree, the restore step and the test restore's chip), but a text field's own text, which
+    // scrolls inside the field.
+    let ppp = harness.ctx.pixels_per_point();
+    let past: Vec<String> = harness
+        .query_all(By::new().include_labels())
+        .filter(|n| {
+            let in_field = n
+                .accesskit_node()
+                .parent()
+                .is_some_and(|p| matches!(p.role(), Role::TextInput | Role::MultilineTextInput));
+            !in_field
+                && n.accesskit_node()
+                    .bounding_box()
+                    .is_some_and(|b| b.x1 as f32 / ppp > width + 0.5)
+        })
+        .map(|n| {
+            format!(
+                "{:?} {:?}",
+                n.accesskit_node().role(),
+                n.accesskit_node().label()
+            )
+        })
+        .collect();
+    assert!(past.is_empty(), "past the window's edge: {past:?}");
+}
+
+#[test]
 fn the_sidebar_is_read_as_tabs_and_switches_pages() {
     use eframe::egui::accesskit::Role;
     use egui_kittest::kittest::{NodeT, Queryable};
@@ -1424,11 +1562,11 @@ fn the_gallerys_components_are_named_and_the_table_answers_the_keyboard() {
             .collect()
     };
     assert_eq!(selected(&harness), ["Photos"]);
-    // Rows with room round their cells.
+    // Rows with room round their cells, compact as they are.
     for row in harness.get_all_by_role(Role::ListBoxOption) {
         let height = row.rect().height();
         assert!(
-            height >= 40.0,
+            height >= replica::ui::theme::space::TABLE_ROW_MIN_HEIGHT,
             "{:?} is {height} high",
             row.accesskit_node().label()
         );

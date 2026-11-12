@@ -29,9 +29,9 @@ use super::restore::{Load, spawn};
 use super::theme::{self, CONTROL_HEIGHT, space};
 use super::widgets::{
     InfoKind, TableColumn, TableState, Tone, danger_button, danger_button_filled, dialog_frame,
-    empty_state, flow, heading, info_bar, info_row, path_row, plain_card, primary_button,
-    relative_time, secondary_button, section_card, section_card_with_actions, segmented,
-    setting_row, status_chip, tab_strip, table, toggle,
+    empty_state, flow, heading, icon_button, info_bar, info_row, path_label, path_row, plain_card,
+    primary_button, relative_time, secondary_button, section_card, section_card_with_actions,
+    segmented, setting_row, small_toggle, status_chip, tab_strip, table, table_frame, toggle,
 };
 
 /// How often it reads the settings and the tasks again while shown.
@@ -524,13 +524,13 @@ impl SettingsTab {
         }
         let columns = [
             // The schedule gets its room first; a name that's cut shows whole on hover.
-            TableColumn::new(tr("tasks-col-task"), Some(90.0)),
-            TableColumn::new(tr("tasks-col-job"), Some(150.0)),
-            TableColumn::new(tr("tasks-col-trigger"), Some(150.0)),
-            TableColumn::new(tr("tasks-col-next"), Some(90.0)),
-            TableColumn::new(tr("tasks-col-last"), Some(160.0)),
-            TableColumn::new(tr("tasks-col-on"), Some(50.0)),
-            TableColumn::new(tr("tasks-col-actions"), Some(100.0)),
+            TableColumn::new(tr("tasks-col-task"), Some(120.0)),
+            TableColumn::new(tr("tasks-col-job"), Some(130.0)),
+            TableColumn::new(tr("tasks-col-trigger"), Some(140.0)),
+            TableColumn::new(tr("tasks-col-next"), Some(84.0)),
+            TableColumn::new(tr("tasks-col-last"), Some(172.0)),
+            TableColumn::new(tr("tasks-col-on"), Some(44.0)),
+            TableColumn::new(tr("tasks-col-actions"), Some(64.0)),
         ];
         // The columns' room, scrolled sideways in a narrow window, with a solid scroll bar so
         // it's plain there's more (nothing hidden).
@@ -543,22 +543,24 @@ impl SettingsTab {
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .show(ui, |ui| {
                     // At least the columns' width: wider than the window, it scrolls.
-                    ui.set_width(width.max(790.0));
-                    table(
-                        ui,
-                        &tr("tasks-title"),
-                        &columns,
-                        tasks.len(),
-                        None,
-                        &mut self.task_table,
-                        |i| tr!("tasks-row", task = tasks[i].name.as_str()),
-                        |_| {},
-                        |ui, row, col| {
-                            if let Some(a) = task_cell(ui, &tasks[row], col, editable) {
-                                action = Some(a);
-                            }
-                        },
-                    );
+                    ui.set_width(width.max(760.0));
+                    table_frame(theme::of(ui)).show(ui, |ui| {
+                        table(
+                            ui,
+                            &tr("tasks-title"),
+                            &columns,
+                            tasks.len(),
+                            None,
+                            &mut self.task_table,
+                            |i| tr!("tasks-row", task = tasks[i].name.as_str()),
+                            |_| {},
+                            |ui, row, col| {
+                                if let Some(a) = task_cell(ui, &tasks[row], col, editable) {
+                                    action = Some(a);
+                                }
+                            },
+                        );
+                    });
                 });
         });
         match action {
@@ -689,7 +691,7 @@ fn task_cell(ui: &mut Ui, task: &ScheduledTask, col: usize, editable: bool) -> O
     let text = |ui: &mut Ui, text: &str| ui.add(egui::Label::new(text).truncate());
     match col {
         0 => {
-            text(ui, &task.name);
+            path_label(ui, &task.name);
         }
         1 if task.orphan => {
             status_chip(ui, Tone::Warning, &tr("tasks-orphan"))
@@ -717,7 +719,7 @@ fn task_cell(ui: &mut Ui, task: &ScheduledTask, col: usize, editable: bool) -> O
                 "tasks-enable-for"
             };
             let changed = ui
-                .add_enabled_ui(editable, |ui| toggle(ui, &mut on))
+                .add_enabled_ui(editable, |ui| small_toggle(ui, &mut on))
                 .inner
                 .accessible_name(tr!(for_key, task = task.name.as_str()))
                 .changed();
@@ -728,10 +730,13 @@ fn task_cell(ui: &mut Ui, task: &ScheduledTask, col: usize, editable: bool) -> O
         _ => {
             let clicked = ui
                 .add_enabled_ui(editable, |ui| {
-                    danger_button(ui, Some(Icon::Delete), &tr("jobs-delete"))
+                    icon_button(
+                        ui,
+                        Icon::Delete,
+                        &tr!("tasks-delete-for", task = task.name.as_str()),
+                    )
                 })
                 .inner
-                .accessible_name(tr!("tasks-delete-for", task = task.name.as_str()))
                 .clicked();
             if clicked {
                 return Some(TaskAction::Delete(task.name.clone()));
