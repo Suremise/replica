@@ -49,6 +49,8 @@ pub struct AppSettings {
     /// How long a run waits, in minutes, for another job to finish with a backup repository
     /// they share, before it fails.
     pub repository_wait_minutes: u32,
+    /// Whether the window shows its status bar (View > Status bar).
+    pub show_status_bar: bool,
 }
 
 impl Default for AppSettings {
@@ -60,6 +62,7 @@ impl Default for AppSettings {
             restic_path: None,
             log_retention_days: 30,
             repository_wait_minutes: 120,
+            show_status_bar: true,
         }
     }
 }
@@ -299,6 +302,11 @@ impl Settings {
             "How many minutes a job waits for another job to finish with a backup repository they share,\nbefore its run fails (default 120). Jobs that share a repository take turns.",
             "repository_wait_minutes",
             &app.repository_wait_minutes.to_string(),
+        );
+        w.key(
+            "Show the status bar along the bottom of the window (default true). View > Status bar sets it.",
+            "show_status_bar",
+            &app.show_status_bar.to_string(),
         );
 
         w.blank();
@@ -751,6 +759,7 @@ mod tests {
                 restic_path: Some(r"C:\Tools\restic.exe".into()),
                 log_retention_days: 14,
                 repository_wait_minutes: 45,
+                show_status_bar: false,
             },
             jobs: vec![
                 Job {

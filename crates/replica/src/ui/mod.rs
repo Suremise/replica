@@ -17,9 +17,11 @@ pub mod geometry;
 pub mod history;
 pub mod icons;
 pub mod jobs;
+pub mod menu;
 pub mod restore;
 pub mod settings;
 pub mod shell;
+pub mod status_bar;
 pub mod theme;
 pub mod widgets;
 

@@ -61,7 +61,8 @@ targets backs up to each in turn, and each target gets its own result.
 
 ### In the window
 
-Open Replica from its icon in the notification area (or the Start menu), then **Jobs > Add job**:
+Open Replica from its icon in the notification area (or the Start menu), then **New job** on the
+Jobs page (or **File > New job…**, Ctrl+N):
 
 1. **Name:** letters, digits, `.`, `_` and `-`. The command line uses it (`replica run documents`).
 2. **Sources:** **Add a folder…** or **Add a file…**. A new source starts with common things to leave
@@ -200,13 +201,13 @@ A job's schedule is one of:
 Without a schedule, a job runs only when you ask. A run missed while the PC was off runs once,
 when Replica is back; it isn't repeated for each missed time.
 
-**What runs the schedules** is set in **Settings > Schedules**:
+**What runs the schedules** is set in **Settings > Schedules** (**Tools > Settings…**, Ctrl+,):
 
 - **The built-in timer (the default):** the tray app runs schedules while it's running. Keep
   **Start with Windows** on (in the tray menu or Settings) so it always is.
 - **Windows Task Scheduler (off by default):** Replica makes a task for each scheduled job, in Task
   Scheduler's "Replica" folder, for your account only and with no admin rights. Backups then run
-  even when the tray app isn't running, **while you're logged on**. **Settings > Scheduled tasks**
+  even when the tray app isn't running, **while you're logged on**. **Tools > Scheduled tasks…**
   shows every task, with its next and last run, and lets you turn each on or off, delete one or
   all, or open Task Scheduler itself. A task whose job is gone is flagged. Turning the option off
   asks whether to delete the tasks (the default) or keep them turned off; the built-in timer then
@@ -221,6 +222,32 @@ A job is **overdue** when its last good backup is older than its schedule allows
 You're told once a day while it stays overdue (not while schedules are paused), and the Jobs page
 shows **Overdue** in its Status column, even if the job keeps running and failing: hover over it
 for when it was due, its last good backup and how its last run ended.
+
+## The window
+
+Across the top is a menu bar; down the left, the three pages you use most (**Jobs**, **History**
+and **Restore**); along the bottom, a status bar.
+
+- **File:** **New job…** (Ctrl+N), **Import jobs…** and **Export jobs…** (as the Jobs page's
+  buttons), **Open settings folder**, **Open log folder**, **Close window** (to the notification
+  area, as the window's close button does) and **Exit Replica** (as **Quit** in the tray menu).
+- **Jobs:** **Run all** (every job that's on) and **Stop running jobs** (the one running and those
+  waiting their turn).
+- **View:** the pages (Ctrl+1, Ctrl+2, Ctrl+3) and **Status bar**, to hide or show it (remembered,
+  as `show_status_bar` in the settings file).
+- **Tools:** **Settings…** (Ctrl+,), **Scheduled tasks…** (the Settings page at its Schedules tab)
+  and **Windows Task Scheduler**.
+- **Help:** **Replica on GitHub** and **About Replica** (the version, the licence and the
+  third-party notices).
+
+The menus open with a click, or with Tab and Enter; the shortcuts work from anywhere in the
+window unless a dialog is open. A command that doesn't apply now is greyed out (**New job…** while
+a job is being edited, **Stop running jobs** when nothing runs).
+
+**The status bar** says what's happening: **Ready**, or the job running with its progress and how
+many are queued after it; the next scheduled run; how many jobs' last runs failed, were partly
+done or skipped, or are overdue (click it to see them in History); what runs the schedules
+(**Built-in timer** or **Task Scheduler**); and **Portable** for the portable copy.
 
 ## The tray icon
 
@@ -444,8 +471,8 @@ with Windows entry. It **never** removes your settings, history, logs or backups
 
 **Where to look first.** **History** in the window shows every run, each target's result and why,
 and **Open the log** for that run. The logs are in `logs\runs\` (one per run) and `logs\` (one per
-start of the tray or the command line) in Replica's folder (see above); **Settings > Open the logs
-folder** opens them. `replica status` shows every job's last result and what's running.
+start of the tray or the command line) in Replica's folder (see above); **File > Open log folder**
+(or **Settings > Open the logs folder**) opens them. `replica status` shows every job's last result and what's running.
 
 **"The target isn't available" (skipped).** The drive isn't plugged in, or the NAS is off or out
 of reach. Plug it in or switch it on, and run the job again, or wait for the next scheduled run.
@@ -514,5 +541,5 @@ file is fixed.
 
 **A job didn't run on schedule.** Check **Pause schedules** is off and the job is **On**. With the
 built-in timer, the tray app must be running (turn on **Start with Windows**). With Task Scheduler,
-check **Settings > Scheduled tasks**: its task should be on, and runs happen only while you're
+check **Tools > Scheduled tasks…**: its task should be on, and runs happen only while you're
 logged on.

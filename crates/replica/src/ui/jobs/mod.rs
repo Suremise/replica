@@ -264,7 +264,7 @@ impl JobsTab {
     }
 
     /// Opens Export... with `only` chosen, else the job selected in the table, else every job.
-    fn open_export(&mut self, only: Option<&str>) {
+    pub fn open_export(&mut self, only: Option<&str>) {
         let chosen = only.map(str::to_owned).or_else(|| self.selected_name());
         self.export = Some(ExportDialog::new(self.jobs(), |j| {
             chosen
@@ -274,7 +274,7 @@ impl JobsTab {
     }
 
     /// Asks for a jobs file and opens its preview, or says why it can't be imported.
-    fn open_import(&mut self) {
+    pub fn open_import(&mut self) {
         let Some(path) = self.backend.open_jobs_file() else {
             return;
         };

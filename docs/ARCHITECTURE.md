@@ -506,7 +506,8 @@ the only language in v1, and the fallback for every key.
 - **The files are compiled in** (`include_str!` in `crates/replica-core/src/i18n/embedded.rs`), so
   the portable copy needs no extra files. They are split by where the strings show: `common.ftl`
   (run results and skip reasons, used everywhere), `cli.ftl`, `tray.ftl`, `notifications.ftl`,
-  `window.ftl`, `errors.ftl`, `tasks.ftl` and `installer.ftl`. The last is the MSI's own text,
+  `window.ftl`, `chrome.ftl` (the window's menu bar and status bar), `errors.ftl`, `tasks.ftl`
+  and `installer.ftl`. The last is the MSI's own text,
   one plain line each: `scripts/package.ps1` passes it to WiX and checks the built MSI carries it.
 - **No text in the code:** `crates/replica/tests/strings.rs` scans the three crates'
   non-test code. In a call that shows text (printing, the window's labels and buttons,
@@ -837,7 +838,7 @@ stopped, and Open shows that instead of doing nothing. The log follows the windo
 shown, closed or minimised to the tray, each file dialog opened and closed, Open and Quit.
 
 **The window doesn't run anything itself.** It edits `settings.toml` and asks the tray
-(`ui::backend::UiRequest`: `Reload`, `Run(jobs)`, `Stop`) over a channel the tray drains on
+(`ui::backend::UiRequest`: `Reload`, `Run(jobs)`, `Stop`, `Quit`) over a channel the tray drains on
 every loop. The tray reports back through a shared `ui::backend::Status` (what's running and at
 what percentage, what's queued, each job's last run), and wakes the window when it changes. So
 a job runs the same way from the menu, the timer and the window: one at a time, with the same
@@ -847,16 +848,61 @@ lock and history.
 tray, Credential Manager, the connected volumes, Task Scheduler, restic and the file pickers
 (`rfd`). `LiveBackend` is the real one; tests give it temp folders and fakes.
 
-**The shell (`ui/shell.rs`):**
-- A left sidebar of the pages: Jobs, History, Restore, Settings (with the Scheduled-tasks view)
-  and About, each a module shown by `Shell::tab`, with an icon from `ui/icons.rs`. The page shown
-  has the accent's bar and a subtle fill. A screen reader reads the sidebar as a tab list
-  ("Pages"), each page a tab with its selected state.
-- Over the page, its header: the title (24 semibold) and a line under it (`page-*-subtitle`).
-  The page is at most 880 points wide, 24 from the sidebar. The sidebar is 240 wide, 200 under
-  a 1000-point window, and under 880 points a 56-point **rail** of the icons alone, each page's
-  name in its hover text (and still its name for a screen reader).
-- The sidebar's header is the app icon (20 points) and "Replica" at section size. `build.rs`
+**The shell (`ui/shell.rs`)**, the window's frame, dense and quiet as a desktop tool's (Explorer's
+details view rather than Windows 11 Settings). Its strings are `chrome.ftl`'s; its sizes are its
+own constants (`shell.rs`, `menu.rs`, `status_bar.rs`), so the pages' look (`theme.rs`,
+`widgets.rs`) and the frame change apart:
+- **A menu bar** (`ui/menu.rs`, egui's `MenuBar`) across the top: File (New job…, Import jobs…,
+  Export jobs…, Open settings folder, Open log folder, Close window, Exit Replica), Jobs (Run
+  all, Stop running jobs), View (the three pages, Status bar), Tools (Settings…, Scheduled
+  tasks…, Windows Task Scheduler) and Help (Replica on GitHub, About Replica). Each item is a
+  command the window or the tray already had: `menu::menu_bar` returns the `menu::Command`
+  chosen and `Shell::apply` does it, through the same calls as the page's own button (a new job is
+  `JobsTab::edit(None)`, Export… is `JobsTab::open_export`) or the tray's menu (Exit is
+  `UiRequest::Quit`, which the tray takes as its own Quit). An item that doesn't apply now
+  (`menu::MenuState::applies`: New job… while a job is being edited, Stop with nothing running)
+  is greyed out, and its shortcut does nothing either. Items are 13-point text with a 24-point
+  gutter for a tick (the page shown, the status bar on) and their shortcut on the right.
+  Choosing one closes the menu, whether by a click, Enter or a screen reader's Click (egui closes
+  it only for a pointer's click).
+- **Shortcuts** (`menu::shortcuts`, once a frame, not while a modal dialog is up): Ctrl+N (New
+  job), Ctrl+1/2/3 (Jobs, History, Restore), Ctrl+, (Settings). egui 0.37's menu bar has **no
+  Alt or F10 to the bar and no arrow keys between menus**; the menus open with a click, or Tab
+  and Enter, and the shortcuts are the keyboard's way to the commands. For a screen reader the
+  bar is a `MenuBar`, each menu a `MenuItem` with a popup, each item a `MenuItem` (a
+  `MenuItemRadio` for a page, a `MenuItemCheckBox` for Status bar) named without its shortcut,
+  which is its `keyboard_shortcut`.
+- **A status bar** (`ui/status_bar.rs`), 24 points along the bottom on the frame's raised fill
+  with a hairline above, 12-point text in segments with thin dividers: Ready, or the running job
+  with its percentage and a bar, what it waits for and how many are queued; then, from the right,
+  "Portable", what runs the schedules, the problems ("1 failed, 1 skipped" in the status
+  colours, overdue jobs too; a click shows History, filtered to the job if only one) and the
+  next scheduled run of a job not already running or queued ("Next: Documents, tomorrow 02:30",
+  or "Schedules paused"). The segments share the bar's width by priority: the problems are never
+  dropped (they're the way to History), then the next run, what runs the schedules and
+  "Portable"; the activity takes what's left. A name that doesn't fit is cut short with "…" (its
+  whole text in its hover text and for a screen reader), and a segment with no room even for 72
+  points of it is left out, so nothing runs past the edge at the window's narrowest.
+  `status_bar::Facts::of` works it out from the tray's `Status`, the
+  settings and `Places`, each frame the window draws anyway, so it follows a run as the tray
+  wakes the window, at no polling of its own. View > Status bar turns it off and on, saved as
+  `show_status_bar` in `settings.toml` (on by default; kept for the session only where the
+  settings can't be written). The frame reads the settings itself, as the Jobs page does (again
+  when the file's time changes, checked once a second), whichever page shows: the status bar,
+  the menus' state and Run all use these, not the Jobs page's copy, which it refreshes only while
+  it shows.
+- **A compact sidebar** of the main pages: Jobs, History and Restore, each a module shown by
+  `Shell::tab`, with an icon from `ui/icons.rs`. Settings (with the Scheduled-tasks view) and
+  About are pages too, reached from the Tools and Help menus, so no sidebar item is marked while
+  they show. The page shown has the accent's bar and a subtle fill. A screen reader reads the
+  sidebar as a tab list ("Pages"), each page a tab with its selected state. Items are 32 high, 2
+  apart, 13-point text and 16-point icons; the sidebar is 176 wide, 156 under a 1000-point
+  window, and under 880 points a 44-point **rail** of the icons alone, each page's name in its
+  hover text (and still its name for a screen reader). A hairline divides it from the page.
+- Over the page, a slim header: the title (18 semibold, read as a heading) with the line saying
+  what the page is for beside it in secondary text (`page-*-subtitle`), 14 above it and under
+  it. The page is at most 880 points wide, 20 from the sidebar and the window's edge.
+- The sidebar's header is the app icon (16 points) and "Replica" at 13 semibold. `build.rs`
   decodes the icon's 20, 32, 40, 48 and 64 px PNGs from `assets/icon/replica.ico` to raw RGBA
   (`ui::app_icon` draws the one sharp at the display's scale), so the window decodes nothing
   at start-up. (The exe does carry `png` and `image` anyway: eframe's clipboard, `arboard`,
@@ -1164,6 +1210,17 @@ example the same variable: it uses that prefix and leaves it for its owner to re
   Delete through the row's ⋯ menu; leaving the editor with changes asks first ("Keep
   editing" keeps them, "Discard changes" saves nothing); a saved share login shows its user
   name, never its password, and Change… and "Save login" store a new one at once.
+- `crates/replica/tests/window_frame.rs` drives the frame against a fake backend that records
+  what it asks of the tray, Explorer and the browser: each menu's commands reach their action
+  (New job…, Import and Export, the folders, Close window's tray notice, Exit's `Quit`, Run all
+  and Stop, the pages, Scheduled tasks…, Task Scheduler, GitHub, About) and are greyed out when
+  they don't apply; the shortcuts; the sidebar has only Jobs, History and Restore, Settings and
+  About coming from the menus; View > Status bar turns it off and on and `settings.toml`
+  remembers it in a new window; the frame follows a settings file changed while another page
+  shows (Run all and the next run); at the narrowest window, with long names, a wait and
+  problems, nothing in the status bar passes the edge and the problems stay; the status bar
+  shows Ready, a running job's progress, the queue
+  and the next run, and follows the tray; its problems go to History.
 - `crates/replica/tests/ui_shots.rs`, besides the screenshots: the sidebar is read as a
   tab list whose tabs say which is selected and switch the page; a narrow window's rail keeps
   each page's name; the gallery's components are named (cards' titles as headings, setting

@@ -40,6 +40,8 @@ pub enum UiRequest {
     Run(Vec<String>),
     /// Stop the running job and the queued ones.
     Stop,
+    /// Quit Replica, as Quit in the tray's menu does (the window's File > Exit Replica).
+    Quit,
 }
 
 /// What the tray tells the window: what's running and how each job last ended.

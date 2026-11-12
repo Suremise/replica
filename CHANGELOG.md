@@ -6,6 +6,15 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- The window has a menu bar (File, Jobs, View, Tools, Help) with keyboard shortcuts (Ctrl+N for
+  a new job, Ctrl+1/2/3 for the pages, Ctrl+, for Settings), a status bar showing what's running,
+  the next scheduled run, jobs with problems and what runs the schedules (View > Status bar hides
+  it; `show_status_bar` in `settings.toml` remembers that), and a compact sidebar with Jobs,
+  History and Restore. Settings and About are now in the Tools and Help menus. File > Exit Replica
+  quits Replica as the tray's Quit does.
+
 ## [0.2.0] - 2026-11-02
 
 Mirror runs now list every file/folder clash with what to do, and the tray icon's tooltip always shows.

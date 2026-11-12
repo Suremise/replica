@@ -12,12 +12,13 @@
 //! ```
 //!
 //! Screens: `gallery` (every component, [`gallery`]) and the shell with each page (`jobs`,
-//! `history`, `restore`, `settings`, `about`), on a temp app folder with two jobs, against the
-//! real backend with a test-only Credential Manager prefix and Task Scheduler folder (nothing
-//! is made in either). New screens are added to [`screens`].
+//! `history`, `restore`, `settings`, `about`, and each menu open: `menu-file` and the like), on a
+//! temp app folder with two jobs, against the real backend with a test-only Credential Manager
+//! prefix and Task Scheduler folder (nothing is made in either). New screens are added to [`screens`].
 //!
 //! The same screens are also driven through the accessibility tree, as plain tests: the
-//! sidebar is read as tabs and switches pages, the components are named, and the table answers
+//! sidebar is read as tabs and switches pages (the menu bar and status bar are
+//! `tests/window_frame.rs`'s), the components are named, and the table answers
 //! the keyboard.
 
 #![cfg(windows)]
@@ -577,6 +578,62 @@ fn long_name_screens<'a>() -> Vec<(&'static str, Shoot<'a>)> {
             "history-no-match",
             history(|shell| shell.history.result = Some(Outcome::Failed), false),
         ),
+        // The status bar with a long job running, waiting its turn behind another, one more
+        // queued, and problems: cut to fit, the problems kept.
+        (
+            "long-status",
+            Box::new(|v: Variant, path: &Path| {
+                let now = chrono::Utc::now();
+                let last = |name: &str, outcome| {
+                    (
+                        name.to_lowercase(),
+                        LastRun {
+                            at: now - chrono::TimeDelta::hours(3),
+                            outcome,
+                            reason: None,
+                        },
+                    )
+                };
+                let jobs = vec![
+                    job(
+                        LONG_JOB,
+                        "daily 02:30",
+                        Mode::Versioned,
+                        r"D:\Work",
+                        LONG_LABEL,
+                    ),
+                    job(LONG_JOB_2, "every 6h", Mode::Mirror, r"D:\Photos", "PHOTOS"),
+                    job(
+                        "Music",
+                        "weekly sat 10:00",
+                        Mode::Versioned,
+                        r"D:\Music",
+                        "BACKUP",
+                    ),
+                    job("Notes", "every 2h", Mode::Versioned, r"D:\Notes", "BACKUP"),
+                ];
+                let status = Status {
+                    running: Some((LONG_JOB.into(), 42)),
+                    waiting: Some(format!(
+                        "Waiting for {LONG_JOB_2} to finish with {LONG_LABEL}"
+                    )),
+                    queued: vec!["Music".into()],
+                    last: [
+                        last(LONG_JOB_2, Outcome::Skipped),
+                        last("Notes", Outcome::Failed),
+                    ]
+                    .into(),
+                    since: Some(now),
+                    ..Status::default()
+                };
+                let fixture = Fixture::with_jobs(jobs, status);
+                let mut harness = v.default_size().build_ui_state(
+                    |ui, shell: &mut Shell| shell.show(ui),
+                    fixture.shell(Tab::History),
+                );
+                save(&mut harness, v.scale, path);
+            }),
+        ),
         (
             "long-jobs",
             Box::new(|v: Variant, path: &Path| {
@@ -996,6 +1053,31 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
             save(&mut harness, v.scale, path);
         }),
     ));
+    // The frame's menus, each open over the busy Jobs page.
+    for (name, menu) in [
+        ("menu-file", "File"),
+        ("menu-jobs", "Jobs"),
+        ("menu-view", "View"),
+        ("menu-tools", "Tools"),
+    ] {
+        screens.push((
+            name,
+            Box::new(move |v: Variant, path: &Path| {
+                use eframe::egui::accesskit::Role;
+                use egui_kittest::kittest::Queryable;
+                let fixture = busy_fixture();
+                let mut harness = v.default_size().build_ui_state(
+                    |ui, shell: &mut Shell| shell.show(ui),
+                    fixture.shell(Tab::Jobs),
+                );
+                let _ = harness.try_run();
+                harness
+                    .get_by_role_and_label(Role::MenuItem, menu)
+                    .click_accesskit();
+                save(&mut harness, v.scale, path);
+            }),
+        ));
+    }
     screens.extend(jobs_screens());
     // Each of Settings' tabs (Schedules with Task Scheduler on and two tasks), and Jobs,
     // at the window's first-run size.
@@ -1284,22 +1366,22 @@ fn the_sidebar_is_read_as_tabs_and_switches_pages() {
         .get_all_by_role(Role::Tab)
         .map(|t| t.accesskit_node().label().unwrap_or_default())
         .collect();
-    assert_eq!(tabs, ["Jobs", "History", "Restore", "Settings", "About"]);
+    // Settings and About are in the menus (tests/window_frame.rs).
+    assert_eq!(tabs, ["Jobs", "History", "Restore"]);
     let selected = |h: &Harness<'_, Shell>, name: &str| {
         h.get_by_role_and_label(Role::Tab, name)
             .accesskit_node()
             .is_selected()
     };
     assert_eq!(selected(&harness, "Jobs"), Some(true));
-    assert_eq!(selected(&harness, "About"), Some(false));
+    assert_eq!(selected(&harness, "History"), Some(false));
 
-    harness.get_by_role_and_label(Role::Tab, "About").click();
+    harness.get_by_role_and_label(Role::Tab, "History").click();
     let _ = harness.try_run();
-    assert_eq!(harness.state().tab, Tab::About);
-    assert_eq!(selected(&harness, "About"), Some(true));
+    assert_eq!(harness.state().tab, Tab::History);
+    assert_eq!(selected(&harness, "History"), Some(true));
     // The page's header and the page itself.
-    harness.get_by_label("The version, the licence and the third-party notices");
-    harness.get_by_label_contains(env!("CARGO_PKG_VERSION"));
+    harness.get_by_label("Every run and test restore, newest first");
     harness.check_accessibility();
 }
 
@@ -1387,8 +1469,8 @@ fn settings_tabs_are_read_as_a_tab_list_and_answer_the_arrow_keys() {
             .map(|n| n.accesskit_node().label().unwrap_or_default())
             .collect()
     };
-    // The sidebar's Settings, and Settings' own first tab.
-    assert_eq!(selected(&harness), ["Settings", "Schedules"]);
+    // Settings' own first tab (Settings itself is reached from the menus, not the sidebar).
+    assert_eq!(selected(&harness), ["Schedules"]);
     harness.get_by_label("Scheduled tasks");
 
     harness.get_by_role_and_label(Role::Tab, "Storage").click();
@@ -1411,7 +1493,7 @@ fn settings_tabs_are_read_as_a_tab_list_and_answer_the_arrow_keys() {
         let _ = harness.try_run();
         assert_eq!(harness.state().settings.page, page, "after {key:?}");
     }
-    assert_eq!(selected(&harness), ["Settings", "Schedules"]);
+    assert_eq!(selected(&harness), ["Schedules"]);
     // Still on the tabs: the arrows didn't take the focus off them.
     assert!(
         harness
@@ -1425,7 +1507,7 @@ fn settings_tabs_are_read_as_a_tab_list_and_answer_the_arrow_keys() {
     let _ = harness.try_run();
     harness.get_by_role_and_label(Role::Tab, "Jobs").click();
     let _ = harness.try_run();
-    harness.get_by_role_and_label(Role::Tab, "Settings").click();
+    harness.state_mut().tab = Tab::Settings;
     let _ = harness.try_run();
     assert_eq!(harness.state().settings.page, Page::General);
     harness.check_accessibility();
@@ -1449,12 +1531,12 @@ fn a_narrow_window_has_a_rail_with_the_pages_names() {
         })
         .collect();
     let names: Vec<&str> = tabs.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, ["Jobs", "History", "Restore", "Settings", "About"]);
+    assert_eq!(names, ["Jobs", "History", "Restore"]);
     // Only the icons: each item is a rail's width, not the sidebar's.
     assert!(tabs.iter().all(|(_, w)| *w <= 48.0), "{tabs:?}");
-    harness.get_by_role_and_label(Role::Tab, "Settings").click();
+    harness.get_by_role_and_label(Role::Tab, "Restore").click();
     let _ = harness.try_run();
-    assert_eq!(harness.state().tab, Tab::Settings);
+    assert_eq!(harness.state().tab, Tab::Restore);
     harness.check_accessibility();
 }
 

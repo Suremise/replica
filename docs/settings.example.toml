@@ -20,6 +20,8 @@ log_retention_days = 30
 # How many minutes a job waits for another job to finish with a backup repository they share,
 # before its run fails (default 120). Jobs that share a repository take turns.
 repository_wait_minutes = 120
+# Show the status bar along the bottom of the window (default true). View > Status bar sets it.
+show_status_bar = true
 
 # Jobs. Each [[jobs]] table is one job; docs/settings.example.toml has examples.
 

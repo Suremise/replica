@@ -25,6 +25,7 @@ pub static LOCALES: &[Locale] = &[Locale {
         ftl!("en", "tray.ftl"),
         ftl!("en", "notifications.ftl"),
         ftl!("en", "window.ftl"),
+        ftl!("en", "chrome.ftl"),
         ftl!("en", "errors.ftl"),
         ftl!("en", "tasks.ftl"),
         ftl!("en", "installer.ftl"),

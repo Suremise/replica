@@ -384,7 +384,10 @@ impl App {
                 }
             }
             self.drain_worker();
-            self.drain_window();
+            if self.drain_window() {
+                tracing::info!("quitting: Exit in the window's menu");
+                return 0;
+            }
             self.follow_up_window();
             if self.last_tick.is_none_or(|t| t.elapsed() >= TICK) {
                 self.last_tick = Some(Instant::now());
@@ -398,8 +401,9 @@ impl App {
         }
     }
 
-    /// Does what the window asked.
-    fn drain_window(&mut self) {
+    /// Does what the window asked. True when it asked to quit: the caller quits as Quit in
+    /// the tray's menu does.
+    fn drain_window(&mut self) -> bool {
         while let Ok(request) = self.ui_requests.try_recv() {
             match request {
                 UiRequest::Reload => self.reload_settings(true),
@@ -408,9 +412,11 @@ impl App {
                     self.queue.clear();
                     self.worker.stop_all();
                 }
+                UiRequest::Quit => return true,
             }
         }
         self.start_next();
+        false
     }
 
     /// Tells the window what's running and how each job last ended, when that changed.
