@@ -14,7 +14,9 @@ use eframe::egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use replica::ui::Shared;
-use replica::ui::backend::{Backend, LastRun, Places, RestoreJob, Status, TargetCheck, UiRequest};
+use replica::ui::backend::{
+    Backend, LastRun, Places, RestoreJob, Status, TargetCheck, UiRequest, UpdateStatus,
+};
 use replica::ui::geometry::WindowState;
 use replica::ui::shell::{Shell, Tab};
 use replica_core::cancel::CancelToken;
@@ -791,4 +793,84 @@ fn the_status_bar_fits_the_narrowest_window() {
         .click_accesskit();
     let _ = harness.try_run();
     assert_eq!(harness.state().tab, Tab::History);
+}
+
+/// Help > Check for updates and About's Check now ask the tray for a check (whatever the
+/// setting: the user asked), and About and the status bar show what it found: checking, the
+/// latest, a newer release with a link to its page, or why it couldn't check.
+#[test]
+fn updates_are_checked_by_hand_and_a_newer_release_links_to_its_page() {
+    const URL: &str = "https://github.com/Suremise/replica/releases/tag/v0.4.0";
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness();
+    let set = |harness: &mut Harness<'_, Shell>, update: UpdateStatus| {
+        fixture.fake.status.lock().unwrap().update = update;
+        let _ = harness.try_run();
+    };
+
+    choose(&mut harness, "Help", "Check for updates…");
+    assert_eq!(harness.state().tab, Tab::About);
+    assert_eq!(
+        fixture.fake.asked(),
+        [Asked::Tray(UiRequest::CheckForUpdates)]
+    );
+
+    // While it checks, Check now waits.
+    set(&mut harness, UpdateStatus::Checking);
+    harness.get_by_label("Checking GitHub for the latest release…");
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, "Check now")
+            .accesskit_node()
+            .is_disabled()
+    );
+
+    set(&mut harness, UpdateStatus::Latest("0.3.0".into()));
+    harness.get_by_label("You have the latest version (0.3.0).");
+    assert!(
+        harness
+            .query_by_label_contains("Update available")
+            .is_none()
+    );
+    harness
+        .get_by_role_and_label(Role::Button, "Check now")
+        .click_accesskit();
+    let _ = harness.try_run();
+    assert_eq!(
+        fixture.fake.asked(),
+        [Asked::Tray(UiRequest::CheckForUpdates)]
+    );
+
+    // A newer release: in About with a link, and in the status bar, which links there too.
+    set(
+        &mut harness,
+        UpdateStatus::Newer {
+            version: "0.4.0".into(),
+            url: URL.into(),
+        },
+    );
+    harness.get_by_label("Replica 0.4.0 is available.");
+    harness
+        .get_by_label("See what's new on GitHub")
+        .click_accesskit();
+    let _ = harness.try_run();
+    harness
+        .get_by_role_and_label(Role::Button, "Update available: 0.4.0")
+        .click_accesskit();
+    let _ = harness.try_run();
+    assert_eq!(
+        fixture.fake.asked(),
+        [Asked::Url(URL.into()), Asked::Url(URL.into())]
+    );
+
+    set(
+        &mut harness,
+        UpdateStatus::Failed("The operation timed out".into()),
+    );
+    harness.get_by_label_contains("Replica couldn't check for updates: The operation timed out");
+    assert!(
+        harness
+            .query_by_label_contains("Update available")
+            .is_none()
+    );
 }

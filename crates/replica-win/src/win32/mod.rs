@@ -1,7 +1,8 @@
 //! Thin, safe wrappers round the Win32 calls Replica needs: volumes, Credential Manager,
 //! network connections, the system's random numbers and job objects here; the UI languages
 //! ([`locale`]), the console's echo ([`console`]), the registry ([`registry`]), the tray's
-//! window, icon and menu ([`ui`]) and Task Scheduler ([`tasks`]).
+//! window, icon and menu ([`ui`]), Task Scheduler ([`tasks`]) and the update check's one
+//! request ([`http`]).
 //!
 //! The only module (with its submodules) where `unsafe` is allowed: the workspace denies it
 //! elsewhere. Each wrapper owns the buffers it passes to Windows, checks the result, copies
@@ -10,6 +11,7 @@
 #![allow(unsafe_code)]
 
 pub mod console;
+pub mod http;
 pub mod locale;
 pub mod registry;
 pub mod tasks;

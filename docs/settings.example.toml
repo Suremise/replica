@@ -11,6 +11,9 @@
 schedule_mode = "timer"
 # Start the tray app when you log on to Windows (default false).
 start_with_windows = true
+# Ask GitHub for Replica's latest release when the tray app starts, and once a day while it runs
+# (default false). A newer one is shown with a link to its page; nothing is downloaded.
+check_for_updates = false
 # Pause all schedules; jobs still run by hand (default false).
 pause_schedules = false
 # A restic.exe to use instead of the one bundled with Replica (default: the bundled one).

@@ -34,7 +34,7 @@ page-history-subtitle = Every run and test restore, newest first
 page-restore-subtitle = Get files back from a backup
 page-schedules-subtitle = Replica's tasks in Windows Task Scheduler
 page-settings-subtitle = How Replica runs, and where it keeps its files
-page-about-subtitle = The version, the licence and the third-party notices
+page-about-subtitle = The version, updates, the licence and the third-party notices
 
 ## Words the window's components show themselves
 
@@ -389,6 +389,9 @@ settings-mode-help =
 settings-see-schedules = See Replica's tasks in Task Scheduler on the Schedules page
 settings-pause-help = No job runs on its schedule until you turn this off. Run now still works.
 settings-start-with-windows-help = Starts Replica's tray app when you sign in to Windows.
+settings-check-for-updates-help =
+    Asks GitHub for Replica's latest release when Replica starts, and once a day while it runs.
+    A newer one is shown with a link to its page; nothing is downloaded.
 # Its accessible name: the unit is shown beside the number (settings-days-unit).
 settings-log-days = Keep run logs for (days)
 settings-log-days-label = Keep run logs for
@@ -471,6 +474,15 @@ about-copy = Copy
 about-go-to-restic = Go to restic's section
 about-links = Links
 about-project = Replica's page
+about-updates = Updates
+about-check-now = Check now
+about-checking = Checking GitHub for the latest release…
+about-update-latest = You have the latest version ({ $version }).
+about-update-newer = Replica { $version } is available.
+about-update-open = See what's new on GitHub
+# $reason: why, in the system's words (no connection, a timeout) or update-failed-status.
+about-update-failed = Replica couldn't check for updates: { $reason }
+about-updates-help = Asks GitHub once for Replica's latest release. Nothing is downloaded.
 about-notices-missing = This build doesn't carry the crates' notices: they're made with each release (THIRD-PARTY-NOTICES). restic's are below.
 
 ## History

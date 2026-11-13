@@ -39,7 +39,7 @@ use eframe::egui::Theme;
 use egui_kittest::{Harness, HarnessBuilder};
 use fake::{Faked, Gate, task};
 use replica::ui::Shared;
-use replica::ui::backend::{Backend, LastRun, LiveBackend, Status, UiRequest};
+use replica::ui::backend::{Backend, LastRun, LiveBackend, Status, UiRequest, UpdateStatus};
 use replica::ui::geometry::WindowState;
 use replica::ui::settings::Page;
 use replica::ui::shell::{Shell, Tab};
@@ -467,6 +467,7 @@ fn busy_fixture_with(edit: impl FnOnce(&mut Status)) -> Fixture {
         .into(),
         since: Some(now - chrono::TimeDelta::hours(30)),
         overdue: Default::default(),
+        update: Default::default(),
     };
     let mut status = status;
     edit(&mut status);
@@ -1211,6 +1212,34 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
                     harness.step();
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
+                save(&mut harness, v.scale, path);
+            }),
+        ));
+    }
+    // About after an update check: a newer release (also in the status bar, a link to its
+    // page), and a check that couldn't reach GitHub.
+    for (name, update) in [
+        (
+            "about-update",
+            UpdateStatus::Newer {
+                version: "0.4.0".into(),
+                url: "https://github.com/Suremise/replica/releases/tag/v0.4.0".into(),
+            },
+        ),
+        (
+            "about-update-failed",
+            UpdateStatus::Failed("The server name or address could not be resolved".into()),
+        ),
+    ] {
+        screens.push((
+            name,
+            Box::new(move |v: Variant, path: &Path| {
+                let fixture = Fixture::new();
+                fixture.backend.live.status.lock().unwrap().update = update.clone();
+                let mut harness = v.default_size().build_ui_state(
+                    |ui, shell: &mut Shell| shell.show(ui),
+                    fixture.shell(Tab::About),
+                );
                 save(&mut harness, v.scale, path);
             }),
         ));

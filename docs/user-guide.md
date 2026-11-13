@@ -10,6 +10,7 @@ getting files back, and what to do when something goes wrong.
 - [The repository password](#the-repository-password)
 - [Before and after steps](#before-and-after-steps)
 - [Schedules](#schedules)
+- [Updates](#updates)
 - [The tray icon](#the-tray-icon)
 - [Restoring](#restoring)
 - [A test restore routine](#a-test-restore-routine)
@@ -240,7 +241,8 @@ the sidebar shows only the pages' icons: hover over one for its name.
   (Ctrl+3), **Schedules** (Ctrl+4) and **Settings** (Ctrl+,); then **Status bar**, to hide or show
   it (remembered, as `show_status_bar` in the settings file).
 - **Tools:** **Windows Task Scheduler**, to open Windows' own.
-- **Help:** **Replica on GitHub** and **About Replica** (the version, the licence and the
+- **Help:** **Replica on GitHub**, **Check for updates…** (asks GitHub now and shows the answer
+  in About) and **About Replica** (the version, the update check, the licence and the
   third-party notices).
 
 The menus open with a click, or with Tab and Enter; the shortcuts work from anywhere in the
@@ -250,7 +252,27 @@ a job is being edited, **Stop running jobs** when nothing runs).
 **The status bar** says what's happening: **Ready**, or the job running with its progress and how
 many are queued after it; the next scheduled run; how many jobs' last runs failed, were partly
 done or skipped, or are overdue (click it to see them in History); what runs the schedules
-(**Built-in timer** or **Task Scheduler**); and **Portable** for the portable copy.
+(**Built-in timer** or **Task Scheduler**); **Portable** for the portable copy; and **Update
+available**, when the update check has found a newer Replica (click it to open that release's
+page).
+
+## Updates
+
+Replica can tell you when a new version is out. **It never downloads or installs anything**: it
+shows you a link to the release's page on GitHub, and you download it from there.
+
+- **Check for updates** (in **Settings**, General, and in the tray menu, beside **Start with
+  Windows**) is **off by default**. While it's on, the tray app asks GitHub which release is the
+  latest when it starts, and once a day while it keeps running. A newer one shows a notification
+  ("Replica 0.4.0 is available"; click it for the release's page), a note in the status bar and
+  the same in **About**.
+- **Check now** in **About** (or **Help > Check for updates…**) asks once, whether the setting
+  is on or off: About then says you have the latest version, shows the newer one with a link, or
+  says why it couldn't check (no connection, a timeout).
+- It's the only time Replica goes on the internet: one request for
+  `https://github.com/Suremise/replica/releases/latest`, which GitHub answers by pointing at the
+  latest release. Nothing about you or your PC is sent beyond what any web request carries, and
+  the command line never checks.
 
 ## The tray icon
 
@@ -265,7 +287,8 @@ the taskbar to keep it in view):
 | Amber dot | A job is overdue |
 
 Click it to open the window; right-click for **Run all now**, **Run** a single job, **Stop** the
-running one, **Open Replica…**, **Pause schedules**, **Start with Windows** and **Quit**.
+running one, **Open Replica…**, **Pause schedules**, **Start with Windows**, **Check for
+updates** (see [Updates](#updates)) and **Quit**.
 
 **Notifications:** a failed or partly done run always notifies you. A successful one notifies only
 if its job asks (**Notify me when it succeeds**). A skipped run doesn't; an overdue notice covers a

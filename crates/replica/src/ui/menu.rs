@@ -41,6 +41,9 @@ pub enum Command {
     /// Windows' own Task Scheduler.
     TaskScheduler,
     ProjectPage,
+    /// Asks GitHub for the latest release now, whatever the setting, and shows the answer in
+    /// About.
+    CheckForUpdates,
     About,
 }
 
@@ -215,6 +218,13 @@ pub fn menu_bar(ui: &mut Ui, state: &MenuState) -> Option<Command> {
                         state,
                         Command::ProjectPage,
                         "menu-project-page",
+                        &mut chosen,
+                    );
+                    item(
+                        ui,
+                        state,
+                        Command::CheckForUpdates,
+                        "menu-check-for-updates",
                         &mut chosen,
                     );
                     ui.separator();

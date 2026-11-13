@@ -39,6 +39,10 @@ pub struct AppSettings {
     pub schedule_mode: ScheduleMode,
     /// Whether the tray app starts when the user logs on.
     pub start_with_windows: bool,
+    /// Whether Replica asks GitHub for its latest release when the tray app starts (and once
+    /// a day while it runs). Off by default: it's Replica's one network request, and it only
+    /// tells the user and links to the release, never downloads it.
+    pub check_for_updates: bool,
     /// Whether schedules are paused. Jobs still run by hand.
     pub pause_schedules: bool,
     /// A restic to use instead of the bundled one.
@@ -58,6 +62,7 @@ impl Default for AppSettings {
         AppSettings {
             schedule_mode: ScheduleMode::default(),
             start_with_windows: false,
+            check_for_updates: false,
             pause_schedules: false,
             restic_path: None,
             log_retention_days: 30,
@@ -281,6 +286,12 @@ impl Settings {
             "Start the tray app when you log on to Windows (default false).",
             "start_with_windows",
             &app.start_with_windows.to_string(),
+        );
+        w.key(
+            "Ask GitHub for Replica's latest release when the tray app starts, and once a day while it runs
+(default false). A newer one is shown with a link to its page; nothing is downloaded.",
+            "check_for_updates",
+            &app.check_for_updates.to_string(),
         );
         w.key(
             "Pause all schedules; jobs still run by hand (default false).",
@@ -755,6 +766,7 @@ mod tests {
             app: AppSettings {
                 schedule_mode: ScheduleMode::TaskScheduler,
                 start_with_windows: true,
+                check_for_updates: true,
                 pause_schedules: true,
                 restic_path: Some(r"C:\Tools\restic.exe".into()),
                 log_retention_days: 14,
@@ -1383,7 +1395,8 @@ mod tests {
 
     /// Each released version's `settings.toml` and exported jobs, as that release wrote them
     /// from [`full`] (`fixtures/releases`; a release adds its own): their status bar setting,
-    /// which 0.3.0 added and writes as `false`.
+    /// which 0.3.0 added and writes as `false`. None has `check_for_updates`, which loads as
+    /// off.
     const RELEASED: [(&str, &str, &str, bool); 3] = [
         (
             "0.1.0",
@@ -1412,6 +1425,7 @@ mod tests {
                 Settings::parse(settings).unwrap_or_else(|e| panic!("{version}'s settings: {e}"));
             let mut want = full();
             want.app.show_status_bar = show_status_bar;
+            want.app.check_for_updates = false;
             assert_eq!(loaded.settings, want, "{version}'s settings");
             assert_eq!(loaded.warnings, [], "{version}'s settings");
             assert_eq!(

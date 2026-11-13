@@ -39,14 +39,20 @@ impl Default for TrayNotifier {
 }
 
 impl TrayNotifier {
-    /// Shows the queued notifications from `tray`, on the tray's thread.
-    pub fn show_pending(&self, tray: &Tray) {
+    /// Shows the queued notifications from `tray`, on the tray's thread. Returns how many it
+    /// showed.
+    pub fn show_pending(&self, tray: &Tray) -> usize {
         let receive = self.receive.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shown = 0;
         for n in receive.try_iter() {
-            if let Err(error) = tray.balloon(&n.title, &n.body, kind(n.level)) {
-                tracing::warn!(%error, title = %n.title, "couldn't show a notification");
+            match tray.balloon(&n.title, &n.body, kind(n.level)) {
+                Ok(()) => shown += 1,
+                Err(error) => {
+                    tracing::warn!(%error, title = %n.title, "couldn't show a notification")
+                }
             }
         }
+        shown
     }
 }
 

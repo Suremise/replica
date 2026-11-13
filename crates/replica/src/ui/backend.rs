@@ -42,6 +42,9 @@ pub enum UiRequest {
     Stop,
     /// Quit Replica, as Quit in the tray's menu does (the window's File > Exit Replica).
     Quit,
+    /// Check for updates now, whatever the setting: the user asked (About's Check now, or
+    /// Help > Check for updates).
+    CheckForUpdates,
 }
 
 /// What the tray tells the window: what's running and how each job last ended.
@@ -62,6 +65,26 @@ pub struct Status {
     pub overdue: HashMap<String, Overdue>,
     /// When the tray started: what a schedule counts from for a job that never ran.
     pub since: Option<DateTime<Utc>>,
+    /// What the update check last found, for the status bar and About.
+    pub update: UpdateStatus,
+}
+
+/// What the update check last found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum UpdateStatus {
+    /// No check yet (the setting is off, or it hasn't run).
+    #[default]
+    NotChecked,
+    Checking,
+    /// This version (`0.3.0`) is the latest.
+    Latest(String),
+    /// A newer release, and its page on GitHub.
+    Newer {
+        version: String,
+        url: String,
+    },
+    /// Why the check didn't work, in words.
+    Failed(String),
 }
 
 /// When an overdue job was due, and when it last succeeded.

@@ -19,6 +19,7 @@ use replica_core::repo_lock;
 use replica_core::run::{Outcome, RunEvent, RunReport};
 use replica_core::settings::{ScheduleMode, Settings};
 use replica_core::tr;
+use replica_core::update::Checker;
 use replica_win::autostart::AutoStart;
 use replica_win::notify::TrayNotifier;
 use replica_win::paths::AppPaths;
@@ -29,9 +30,10 @@ use replica_win::tray::{MenuItem, SingleInstance, Tray, TrayEvent};
 use super::icons;
 use super::runner::{self, APP};
 use super::state::{
-    IconState, OverdueNotices, Tooltip, due_since, icon_state, is_due, is_overdue, notification_for,
+    IconState, OverdueNotices, Tooltip, after_update_check, due_since, icon_state, is_due,
+    is_overdue, notification_for,
 };
-use crate::ui::backend::{LastRun, LiveBackend, Overdue, Status, UiRequest};
+use crate::ui::backend::{LastRun, LiveBackend, Overdue, Status, UiRequest, UpdateStatus};
 use crate::ui::{FollowUp, Window};
 
 /// How often the loop wakes when nothing happens.
@@ -46,6 +48,7 @@ mod menu {
     pub const PAUSE: u32 = 4;
     pub const AUTOSTART: u32 = 5;
     pub const QUIT: u32 = 6;
+    pub const UPDATES: u32 = 7;
     /// `RUN_JOB + i` runs the i-th job.
     pub const RUN_JOB: u32 = 1000;
 }
@@ -275,6 +278,16 @@ struct App {
     status: Arc<Mutex<Status>>,
     /// The window's failure to start has been notified.
     window_failure_told: bool,
+    /// The update check: at the tray's start and daily while "Check for updates" is on, and
+    /// when the window asks.
+    updates: Checker,
+    /// What it last found, for the window.
+    update_status: UpdateStatus,
+    /// The newer release last told of in a balloon or found by hand, so it's told once.
+    update_told: Option<String>,
+    /// The page the balloon showing now opens when clicked (a newer release's): `None` once
+    /// another balloon has replaced it, whose click opens the window.
+    balloon_link: Option<String>,
 }
 
 /// Runs the tray app until Quit, with its window open first when `show`. Returns the exit code.
@@ -348,6 +361,13 @@ pub fn run_tray(show: bool) -> i32 {
         ui_requests,
         status: Arc::default(),
         window_failure_told: false,
+        updates: Checker::new(
+            Arc::new(replica_win::update::WinHttp),
+            env!("CARGO_PKG_VERSION"),
+        ),
+        update_status: UpdateStatus::NotChecked,
+        update_told: None,
+        balloon_link: None,
     };
     app.check_folder();
     app.take_installer_choices();
@@ -372,6 +392,10 @@ impl App {
                             return 0;
                         }
                     }
+                    // The update balloon opens the release's page; any other, the window.
+                    TrayEvent::BalloonClicked if self.balloon_link.is_some() => {
+                        self.open_release_page()
+                    }
                     TrayEvent::Activate | TrayEvent::ShowRequested | TrayEvent::BalloonClicked => {
                         tracing::info!(?event, "opening the window");
                         self.open_window()
@@ -395,7 +419,10 @@ impl App {
                 self.tick(Utc::now());
             }
             self.start_next();
-            self.notifier.show_pending(&self.tray);
+            self.check_for_updates();
+            if self.notifier.show_pending(&self.tray) > 0 {
+                self.balloon_link = None;
+            }
             self.show_state();
             self.publish_status();
         }
@@ -413,6 +440,11 @@ impl App {
                     self.worker.stop_all();
                 }
                 UiRequest::Quit => return true,
+                UiRequest::CheckForUpdates => {
+                    tracing::info!("checking for updates: asked in the window");
+                    self.updates.by_hand();
+                    self.update_status = UpdateStatus::Checking;
+                }
             }
         }
         self.start_next();
@@ -453,12 +485,64 @@ impl App {
                 })
                 .collect(),
             since: Some(self.since),
+            update: self.update_status.clone(),
         };
         let mut shared = self.status.lock().unwrap_or_else(|e| e.into_inner());
         if *shared != status {
             *shared = status;
             drop(shared);
             window.repaint();
+        }
+    }
+
+    /// Starts the automatic update check when it's on and due (at the start, then daily), and
+    /// takes a finished check's result: the window's status, and a balloon for a newer
+    /// release not yet told of.
+    fn check_for_updates(&mut self) {
+        if self
+            .updates
+            .tick(self.settings.app.check_for_updates, Instant::now())
+        {
+            tracing::info!("checking for updates");
+            self.update_status = UpdateStatus::Checking;
+        }
+        let Some(checked) = self.updates.poll() else {
+            return;
+        };
+        match &checked.result {
+            Ok(outcome) => tracing::info!(?outcome, by_hand = checked.by_hand, "update check"),
+            Err(error) => tracing::warn!(%error, by_hand = checked.by_hand, "update check failed"),
+        }
+        let (status, balloon) = after_update_check(
+            &checked,
+            env!("CARGO_PKG_VERSION"),
+            self.update_told.as_deref(),
+        );
+        if let UpdateStatus::Newer { version, .. } = &status {
+            self.update_told = Some(version.clone());
+        }
+        self.update_status = status;
+        if let Some(b) = balloon {
+            // After anything queued, so a click on the balloon showing is the link's.
+            self.notifier.show_pending(&self.tray);
+            match self
+                .tray
+                .balloon(&b.title, &b.body, replica_win::tray::BalloonKind::Info)
+            {
+                Ok(()) => self.balloon_link = Some(b.url),
+                Err(error) => tracing::warn!(%error, "couldn't show the update notice"),
+            }
+        }
+    }
+
+    /// The update balloon was clicked: its release's page, in the browser.
+    fn open_release_page(&mut self) {
+        let Some(url) = self.balloon_link.take() else {
+            return;
+        };
+        tracing::info!(%url, "opening the release's page: the update notice was clicked");
+        if let Err(error) = replica_win::window::open(std::path::Path::new(&url)) {
+            self.notify(Level::Error, tr("menu-failed-title"), error.to_string());
         }
     }
 
@@ -929,6 +1013,12 @@ impl App {
                 checked: self.settings.app.start_with_windows,
                 enabled: self.paths.is_writable(),
             },
+            MenuItem::Command {
+                id: menu::UPDATES,
+                text: tr("tray-check-for-updates"),
+                checked: self.settings.app.check_for_updates,
+                enabled: self.paths.is_writable(),
+            },
             MenuItem::Separator,
             MenuItem::Command {
                 id: menu::QUIT,
@@ -968,6 +1058,9 @@ impl App {
             menu::AUTOSTART => {
                 self.change_settings(|s| s.app.start_with_windows = !s.app.start_with_windows);
                 self.apply_autostart();
+            }
+            menu::UPDATES => {
+                self.change_settings(|s| s.app.check_for_updates = !s.app.check_for_updates)
             }
             menu::QUIT => return true,
             id if id >= menu::RUN_JOB => {

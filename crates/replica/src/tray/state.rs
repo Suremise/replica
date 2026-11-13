@@ -1,5 +1,5 @@
 //! The tray's decisions, apart from Windows: which icon, what the tooltip says, which jobs are
-//! due, which are overdue, and what a finished run notifies. Time comes in as a parameter, so
+//! due, which are overdue, and what a finished run or update check notifies. Time comes in as a parameter, so
 //! the tests use a fake clock.
 
 use std::collections::HashMap;
@@ -12,6 +12,9 @@ use replica_core::platform::{Level, Notification};
 use replica_core::run::{Outcome, RunReport};
 use replica_core::schedule::DEFAULT_GRACE;
 use replica_core::tr;
+use replica_core::update::{Checked, Outcome as UpdateOutcome};
+
+use crate::ui::backend::UpdateStatus;
 
 /// The tray icon's state, most important first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -301,6 +304,45 @@ impl Tooltip<'_> {
             Tooltip::Paused => tr("tray-tooltip-paused"),
             Tooltip::Idle => tr("tray-tooltip-idle"),
         }
+    }
+}
+
+/// A balloon telling of a newer release; a click on it opens `url`, the release's page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateBalloon {
+    pub title: String,
+    pub body: String,
+    pub url: String,
+}
+
+/// What a finished update check shows: the window's status (About and the status bar), and a
+/// balloon for a newer release an automatic check found that the tray hasn't told of (`told`,
+/// the version last told of or found by hand). A check by hand shows its result in About, so
+/// it has no balloon; a failed automatic one is only logged and shown in About.
+pub fn after_update_check(
+    checked: &Checked,
+    current: &str,
+    told: Option<&str>,
+) -> (UpdateStatus, Option<UpdateBalloon>) {
+    match &checked.result {
+        Ok(UpdateOutcome::UpToDate) => (UpdateStatus::Latest(current.to_owned()), None),
+        Ok(UpdateOutcome::Newer { version, url }) => {
+            let version = version.to_string();
+            let balloon =
+                (!checked.by_hand && told != Some(version.as_str())).then(|| UpdateBalloon {
+                    title: tr!("update-available-title", version = version.as_str()),
+                    body: tr("update-available-body"),
+                    url: url.clone(),
+                });
+            (
+                UpdateStatus::Newer {
+                    version,
+                    url: url.clone(),
+                },
+                balloon,
+            )
+        }
+        Err(error) => (UpdateStatus::Failed(error.to_string()), None),
     }
 }
 
@@ -734,5 +776,56 @@ mod tests {
             "Replica: 1 job is overdue"
         );
         assert_eq!(Tooltip::Idle.text(), "Replica");
+    }
+
+    #[test]
+    fn an_update_check_s_outcome_is_shown_and_a_new_release_told_once() {
+        use replica_core::update::{CheckError, Version};
+        let url = "https://github.com/Suremise/replica/releases/tag/v0.4.0";
+        let newer = |by_hand| Checked {
+            by_hand,
+            result: Ok(UpdateOutcome::Newer {
+                version: Version::parse("0.4.0").unwrap(),
+                url: url.to_owned(),
+            }),
+        };
+        let shown = UpdateStatus::Newer {
+            version: "0.4.0".into(),
+            url: url.into(),
+        };
+
+        // Found by the automatic check: the window's note, and a balloon that opens its page.
+        let (status, balloon) = after_update_check(&newer(false), "0.3.0", None);
+        assert_eq!(status, shown);
+        let balloon = balloon.expect("a balloon");
+        assert_eq!(balloon.title, "Replica 0.4.0 is available");
+        assert!(balloon.body.contains("GitHub"), "{}", balloon.body);
+        assert_eq!(balloon.url, url);
+        // Once: not again for the same release, and not for a check by hand (About shows it).
+        assert_eq!(
+            after_update_check(&newer(false), "0.3.0", Some("0.4.0")),
+            (shown.clone(), None)
+        );
+        assert_eq!(
+            after_update_check(&newer(true), "0.3.0", None),
+            (shown, None)
+        );
+
+        let latest = Checked {
+            by_hand: true,
+            result: Ok(UpdateOutcome::UpToDate),
+        };
+        assert_eq!(
+            after_update_check(&latest, "0.3.0", None),
+            (UpdateStatus::Latest("0.3.0".into()), None)
+        );
+        let offline = Checked {
+            by_hand: false,
+            result: Err(CheckError::Request("No connection".into())),
+        };
+        assert_eq!(
+            after_update_check(&offline, "0.3.0", None),
+            (UpdateStatus::Failed("No connection".into()), None)
+        );
     }
 }

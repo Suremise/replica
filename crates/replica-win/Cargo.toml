@@ -22,6 +22,8 @@ windows = { workspace = true, features = [
     "Win32_Globalization",
     "Win32_Graphics_Gdi",
     "Win32_NetworkManagement_WNet",
+    # The update check's one request (win32::http).
+    "Win32_Networking_WinHttp",
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Security_Credentials",

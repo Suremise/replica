@@ -285,6 +285,17 @@ impl SettingsTab {
             {
                 self.change(|a| a.start_with_windows = autostart);
             }
+            let mut updates = app.check_for_updates;
+            if setting_row(
+                ui,
+                &tr("tray-check-for-updates"),
+                Some(&tr("settings-check-for-updates-help")),
+                |ui| toggle(ui, &mut updates),
+            )
+            .changed()
+            {
+                self.change(|a| a.check_for_updates = updates);
+            }
             // While it's dragged, the value being dragged; saved when it's let go.
             let mut days = self.log_days.unwrap_or(app.log_retention_days);
             let r = setting_row(

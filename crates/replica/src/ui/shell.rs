@@ -257,8 +257,12 @@ impl Shell {
                     status_bar::show(ui, &facts)
                 })
                 .inner;
-            if clicked {
-                self.show_problems(facts.problems.only);
+            match clicked {
+                Some(status_bar::Clicked::Problems) => self.show_problems(facts.problems.only),
+                Some(status_bar::Clicked::Update(url)) => {
+                    self.failed = self.backend.open_url(&url).err();
+                }
+                None => {}
             }
         }
         let window = ui.available_width();
@@ -512,6 +516,10 @@ impl Shell {
                 self.failed = self.backend.open_task_scheduler().err();
             }
             Command::ProjectPage => self.failed = self.backend.open_url(PROJECT_URL).err(),
+            Command::CheckForUpdates => {
+                self.tab = Tab::About;
+                self.backend.send(UiRequest::CheckForUpdates);
+            }
             Command::About => self.tab = Tab::About,
         }
     }

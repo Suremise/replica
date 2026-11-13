@@ -20,6 +20,7 @@ pub mod settings;
 pub mod snapshot;
 pub mod steps;
 pub mod test_restore;
+pub mod update;
 
 pub mod i18n;
 

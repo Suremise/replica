@@ -793,6 +793,42 @@ Its modes (parsed by `tray::Mode::parse`):
 - It's only ever removed if it starts an exe named `replica-tray.exe`, so another program's
   entry of the same name is left alone.
 
+**The update check (`replica_core::update`, `replica-win::update`; an option, off by default):**
+- **Replica's only network request, and only this:** `GET
+  https://github.com/Suremise/replica/releases/latest` with redirects off, through WinHTTP
+  (`replica-win`'s `win32::http`, part of Windows through the `windows` crate, so no HTTP or TLS
+  crate ships and `cargo deny` and the notices don't change). GitHub answers with a redirect
+  whose `Location` names the latest release's tag (`…/releases/tag/v0.4.0`), which
+  `update::latest_from_location` reads and `update::outcome` compares with this version
+  (a pre-release counts as before its release). No API, no JSON, nothing downloaded or
+  installed: Replica shows a link to the release's page. 15 s timeouts, off the UI thread.
+- **Only a release named, or the releases list, is an answer.** A redirect to the releases list
+  (GitHub's answer before the first release) is up to date. Any other redirect (no `Location`,
+  a sign-in page, a tag that isn't a version) is a failed check ("GitHub's answer didn't name a
+  release of Replica"), never "You have the latest version": the latest is only ever said of a
+  release that was named and compared. WinHTTP's "no such header" is no `Location`; any other
+  failure to read it is an error.
+- **Nothing else touches the network:** `win32::http` is the only code that can, and only
+  `replica-win::update::WinHttp` (the `update::Http` the tray gives its `Checker`) calls it.
+  The CLI and `--run` never check.
+- **When (`update::Checker`, in the tray):** with "Check for updates" on, when the tray starts
+  and then once a day while it runs (`EVERY`, so a tray that runs for weeks doesn't ask every
+  15 s tick, nor only once); and whenever the user asks (About's Check now, Help > Check for
+  updates…: the window sends `UiRequest::CheckForUpdates`), whatever the setting, since asking
+  is the user's choice. One check at a time, each on a thread of its own.
+- **What it shows (`tray::state::after_update_check`):** the result goes into the window's
+  `Status::update` (About's line, and the status bar's "Update available: 0.4.0", a link to the
+  page). A newer release found by the automatic check gets one balloon per release
+  ("Replica 0.4.0 is available"), which opens the page when clicked: the tray remembers the
+  link while that balloon is the latest shown (a later balloon's click opens the window, as
+  before). A check by hand answers in About, so no balloon; a failed automatic check is logged
+  and shown in About only.
+- **Tests:** version comparison and the redirect's reading (copied from Overmark), `check` on
+  each answer, the `Checker`'s timing with a fake `Http` that counts requests (off asks
+  nothing, on asks at start then daily, by hand asks whatever the setting), the request
+  `WinHttp` makes (the URL, HTTPS, redirects off, the timeout), what each outcome shows
+  (`tray/state.rs`), and the window's part (`window_frame.rs`). No test reaches the network.
+
 **Tests:**
 - The timer's due and overdue logic with a fake clock (`tray/state.rs`).
 - Which runs notify, and the tooltip.

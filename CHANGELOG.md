@@ -6,6 +6,17 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Check for updates**, off by default (in Settings, General, and the tray menu, beside
+  Start with Windows). While it's on, Replica asks GitHub which release is the latest when it
+  starts and once a day while it runs, and tells you of a newer one: a notification that opens
+  the release's page, a note in the status bar and the same in About. **Check now** in About
+  (or Help > Check for updates…) asks once whenever you like, and says whether you have the
+  latest version or why it couldn't check. Replica never downloads or installs anything by
+  itself: it links to the release on GitHub. This is the only time Replica goes on the
+  internet.
+
 ### Changed
 
 - Schedules and Settings are in the window's sidebar (Settings at its foot) and in the View

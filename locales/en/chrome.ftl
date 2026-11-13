@@ -30,6 +30,7 @@ menu-task-scheduler = Windows Task Scheduler
 
 menu-help = Help
 menu-project-page = Replica on GitHub
+menu-check-for-updates = Check for updates…
 menu-about = About Replica
 
 # A menu command that couldn't be done: opening a folder, a page or Task Scheduler.
@@ -56,3 +57,6 @@ status-problems-hint = Show them in History
 status-scheduler-timer = Built-in timer
 status-scheduler-tasks = Task Scheduler
 status-portable = Portable
+# A newer release, found by the update check. $version: its version ("0.4.0").
+status-update = Update available: { $version }
+status-update-hint = Opens its page on GitHub

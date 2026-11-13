@@ -1,7 +1,7 @@
 //! The window's status bar: a thin strip along the bottom with what's happening now (Ready,
 //! or the running job and its progress), the next scheduled run, a count of the jobs whose
-//! last run went wrong (a click shows them in History), what runs the schedules, and whether
-//! this is the portable copy.
+//! last run went wrong (a click shows them in History), a newer release the update check found
+//! (a click opens its page), what runs the schedules, and whether this is the portable copy.
 //!
 //! It shows only what the window already has: the tray's [`Status`], the settings and
 //! [`super::backend::Places`]. It reads them as the window draws, so it follows a run as the
@@ -15,7 +15,7 @@ use replica_core::run::Outcome;
 use replica_core::settings::{AppSettings, ScheduleMode};
 use replica_core::tr;
 
-use super::backend::Status;
+use super::backend::{Status, UpdateStatus};
 use super::jobs::{NextRun, next_run};
 use super::theme::{self, Palette};
 
@@ -36,6 +36,17 @@ pub struct Facts {
     pub problems: Problems,
     pub scheduler: ScheduleMode,
     pub portable: bool,
+    /// A newer release: its version and its page.
+    pub update: Option<(String, String)>,
+}
+
+/// What was clicked in the status bar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Clicked {
+    /// The problems: show them in History.
+    Problems,
+    /// The newer release: open its page.
+    Update(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +102,10 @@ impl Facts {
             problems: problems(jobs, status),
             scheduler: app.schedule_mode,
             portable,
+            update: match &status.update {
+                UpdateStatus::Newer { version, url } => Some((version.clone(), url.clone())),
+                _ => None,
+            },
         }
     }
 }
@@ -156,15 +171,15 @@ fn problems(jobs: &[Job], status: &Status) -> Problems {
     problems
 }
 
-/// The status bar, in the panel given it. True when its problems were clicked.
+/// The status bar, in the panel given it, and what was clicked in it.
 ///
 /// Its segments share the width it has: the problems first (a way to History, so never
 /// dropped), then the next run, what runs the schedules and "Portable"; what's happening now
 /// takes the rest. A name that doesn't fit is cut short with "…" (its whole text in its hover
 /// text, and for a screen reader); a segment with no room even for that is left out.
-pub fn show(ui: &mut Ui, facts: &Facts) -> bool {
+pub fn show(ui: &mut Ui, facts: &Facts) -> Option<Clicked> {
     let p = theme::of(ui);
-    let mut clicked = false;
+    let mut clicked = None;
     ui.horizontal_centered(|ui| {
         text_size(ui);
         let plan = Plan::new(ui, facts, ui.available_width());
@@ -189,7 +204,14 @@ pub fn show(ui: &mut Ui, facts: &Facts) -> bool {
                         text(ui, RichText::new(name).color(p.text_secondary), *width)
                     }
                     Segment::Problems => {
-                        clicked = problems_button(ui, p, &facts.problems).clicked();
+                        if problems_button(ui, p, &facts.problems).clicked() {
+                            clicked = Some(Clicked::Problems);
+                        }
+                    }
+                    Segment::Update(text, url) => {
+                        if update_button(ui, p, text, *width).clicked() {
+                            clicked = Some(Clicked::Update(url.clone()));
+                        }
                     }
                     Segment::Next(next) => {
                         text(ui, RichText::new(next).color(p.text_secondary), *width)
@@ -215,6 +237,8 @@ enum Segment {
     Scheduler(String),
     Problems,
     Next(String),
+    /// "Update available: 0.4.0", and the release's page.
+    Update(String, String),
 }
 
 /// How the bar's width is shared: the right's segments as they're shown from the right edge,
@@ -243,6 +267,11 @@ impl Plan {
                 problems_width(ui, &facts.problems),
                 false,
             ));
+        }
+        if let Some((version, url)) = &facts.update {
+            let text = tr!("status-update", version = version.as_str());
+            let width = text_width(ui, &text) + 2.0 * PROBLEMS_PADDING;
+            wanted.push((Segment::Update(text, url.clone()), width, false));
         }
         if let Some(next) = &facts.next {
             wanted.push((Segment::Next(next.clone()), text_width(ui, next), true));
@@ -273,12 +302,14 @@ impl Plan {
             used += width + SEGMENT_COST;
             chosen.push((segment, width));
         }
-        // Shown from the right edge: Portable, what runs the schedules, problems, next.
+        // Shown from the right edge: Portable, what runs the schedules, problems, next, a
+        // newer release.
         let rank = |s: &Segment| match s {
             Segment::Portable => 0,
             Segment::Scheduler(_) => 1,
             Segment::Problems => 2,
             Segment::Next(_) => 3,
+            Segment::Update(..) => 4,
         };
         chosen.sort_by_key(|(s, _)| rank(s));
         Plan {
@@ -413,6 +444,21 @@ fn problems_button(ui: &mut Ui, p: &Palette, problems: &Problems) -> egui::Respo
     ui.spacing_mut().button_padding = vec2(PROBLEMS_PADDING, 1.0);
     let response = ui.add(Button::new(atoms).frame(false));
     response.on_hover_text(tr("status-problems-hint"))
+}
+
+/// "Update available: 0.4.0" in the accent's colour, `width` wide: a link to the release's
+/// page.
+fn update_button(ui: &mut Ui, p: &Palette, text: &str, width: f32) -> egui::Response {
+    ui.spacing_mut().button_padding = vec2(PROBLEMS_PADDING, 1.0);
+    let response = ui.add_sized(
+        vec2(width, ui.available_height()),
+        Button::new(RichText::new(text).color(p.accent)).frame(false),
+    );
+    let response = response.on_hover_text(tr("status-update-hint"));
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
 }
 
 /// A thin upright line between segments.

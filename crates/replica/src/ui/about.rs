@@ -1,6 +1,7 @@
-//! The About tab: the version, Replica's MIT licence, the third-party notices (every crate, and
-//! restic's section with its dependencies' licences, the approved exception to the licence
-//! rule) and the project's page, each in a card.
+//! The About tab: the version, the update check (Check now, and what it found), Replica's MIT
+//! licence, the third-party notices (every crate, and restic's section with its dependencies'
+//! licences, the approved exception to the licence rule) and the project's page, each in a
+//! card.
 //!
 //! The texts are compiled in, so the portable copy needs no extra files.
 
@@ -10,7 +11,7 @@ use eframe::egui::{self, RichText, TextWrapMode, Ui};
 use replica_core::i18n::tr;
 use replica_core::tr;
 
-use super::backend::Backend;
+use super::backend::{Backend, UiRequest, UpdateStatus};
 use super::theme::{self, space};
 use super::widgets::{
     InfoKind, card_frame, collapsing, info_bar, info_row, secondary_button, section_card,
@@ -61,6 +62,7 @@ impl AboutTab {
                     ui.add_space(space::M);
                 }
                 self.app_card(ui);
+                self.updates_card(ui);
                 self.licence_card(ui);
                 self.notices_card(ui);
                 section_card(ui, &tr("about-links"), None, |ui| {
@@ -100,6 +102,73 @@ impl AboutTab {
             });
         });
         ui.add_space(space::M);
+    }
+
+    /// Check now, which asks GitHub once whatever the setting (the tray makes the request),
+    /// and what the last check found: the latest, a newer release with a link to its page, or
+    /// why it couldn't check.
+    fn updates_card(&mut self, ui: &mut Ui) {
+        let update = self.backend.status().update;
+        let checking = update == UpdateStatus::Checking;
+        let mut check = false;
+        let mut open = None;
+        section_card_with_actions(
+            ui,
+            &tr("about-updates"),
+            Some(&tr("about-updates-help")),
+            |ui| {
+                check = ui
+                    .add_enabled(!checking, egui::Button::new(tr("about-check-now")))
+                    .clicked();
+            },
+            |ui| {
+                let p = theme::of(ui);
+                match &update {
+                    UpdateStatus::NotChecked => {}
+                    UpdateStatus::Checking => {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new());
+                            ui.label(RichText::new(tr("about-checking")).color(p.text_secondary));
+                        });
+                    }
+                    UpdateStatus::Latest(version) => {
+                        ui.label(tr!("about-update-latest", version = version.as_str()));
+                    }
+                    UpdateStatus::Newer { version, url } => {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                RichText::new(tr!(
+                                    "about-update-newer",
+                                    version = version.as_str()
+                                ))
+                                .strong(),
+                            );
+                            if ui
+                                .link(tr("about-update-open"))
+                                .on_hover_text(url)
+                                .clicked()
+                            {
+                                open = Some(url.clone());
+                            }
+                        });
+                    }
+                    UpdateStatus::Failed(reason) => {
+                        info_bar(
+                            ui,
+                            InfoKind::Warning,
+                            None,
+                            &tr!("about-update-failed", reason = reason.as_str()),
+                        );
+                    }
+                }
+            },
+        );
+        if check {
+            self.backend.send(UiRequest::CheckForUpdates);
+        }
+        if let Some(url) = open {
+            self.message = self.backend.open_url(&url).err();
+        }
     }
 
     fn licence_card(&mut self, ui: &mut Ui) {

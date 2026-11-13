@@ -392,6 +392,10 @@ fn every_setting_round_trips_and_reset_keeps_the_jobs() {
     });
     harness.get_by_label("Start with Windows").click_accesskit();
     step_until(&mut harness, |_| f.settings().app.start_with_windows);
+    // Off by default, beside Start with Windows.
+    assert!(!f.settings().app.check_for_updates);
+    harness.get_by_label("Check for updates").click();
+    step_until(&mut harness, |_| f.settings().app.check_for_updates);
 
     pick_tab(&mut harness, "restic");
     // The restic in use, found off the UI thread.

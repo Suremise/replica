@@ -34,6 +34,8 @@ pub mod targets;
 #[cfg(windows)]
 pub mod tray;
 #[cfg(windows)]
+pub mod update;
+#[cfg(windows)]
 mod win32;
 #[cfg(windows)]
 pub mod window;

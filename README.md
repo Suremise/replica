@@ -236,8 +236,11 @@ and if they match, choose **More info**, then **Run anyway**.
 
 ## Privacy
 
-**No telemetry, ever.** Replica sends nothing anywhere, has no account and doesn't check for
-updates. It connects to nothing but the targets you set up: your drives and your NAS shares.
+**No telemetry, ever.** Replica sends nothing anywhere and has no account. It connects to
+nothing but the targets you set up (your drives and your NAS shares), and to GitHub only if you
+ask: **"Check for updates" is off by default**. When you turn it on, or press Check now in
+About, Replica only reads which release is the latest on GitHub; it never downloads or installs
+anything by itself.
 
 ## Licence
 
