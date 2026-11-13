@@ -1445,39 +1445,54 @@ mod tests {
     }
 
     /// Each released version's `settings.toml` and exported jobs, as that release wrote them
-    /// from [`full`] (`fixtures/releases`; a release adds its own): their status bar setting,
-    /// which 0.3.0 added and writes as `false`. None has `check_for_updates`, which loads as
-    /// off, or `table_page_size`, which loads as 50.
-    const RELEASED: [(&str, &str, &str, bool); 3] = [
+    /// from [`full`] (`fixtures/releases`; a release adds its own), and whether it wrote the
+    /// keys added since 0.1.0: `show_status_bar` (0.3.0, written as `false`, else it loads as
+    /// on), and `check_for_updates` and `table_page_size` (0.4.0, written as on and 100, else
+    /// they load as off and 50).
+    const RELEASED: [(&str, &str, &str, bool, bool); 4] = [
         (
             "0.1.0",
             include_str!("../fixtures/releases/0.1.0/settings.toml"),
             include_str!("../fixtures/releases/0.1.0/export.toml"),
-            true,
+            false,
+            false,
         ),
         (
             "0.2.0",
             include_str!("../fixtures/releases/0.2.0/settings.toml"),
             include_str!("../fixtures/releases/0.2.0/export.toml"),
-            true,
+            false,
+            false,
         ),
         (
             "0.3.0",
             include_str!("../fixtures/releases/0.3.0/settings.toml"),
             include_str!("../fixtures/releases/0.3.0/export.toml"),
+            true,
             false,
+        ),
+        (
+            "0.4.0",
+            include_str!("../fixtures/releases/0.4.0/settings.toml"),
+            include_str!("../fixtures/releases/0.4.0/export.toml"),
+            true,
+            true,
         ),
     ];
 
     #[test]
     fn every_released_settings_file_loads_with_every_value_kept() {
-        for (version, settings, _, show_status_bar) in RELEASED {
+        for (version, settings, _, has_status_bar, has_updates_and_paging) in RELEASED {
             let loaded =
                 Settings::parse(settings).unwrap_or_else(|e| panic!("{version}'s settings: {e}"));
             let mut want = full();
-            want.app.show_status_bar = show_status_bar;
-            want.app.check_for_updates = false;
-            want.app.table_page_size = 50;
+            if !has_status_bar {
+                want.app.show_status_bar = true;
+            }
+            if !has_updates_and_paging {
+                want.app.check_for_updates = false;
+                want.app.table_page_size = 50;
+            }
             assert_eq!(loaded.settings, want, "{version}'s settings");
             assert_eq!(loaded.warnings, [], "{version}'s settings");
             assert_eq!(
@@ -1492,7 +1507,7 @@ mod tests {
 
     #[test]
     fn every_released_jobs_export_imports_with_every_value_kept() {
-        for (version, _, export, _) in RELEASED {
+        for (version, _, export, _, _) in RELEASED {
             let file = crate::jobs_file::parse(export)
                 .unwrap_or_else(|e| panic!("{version}'s export: {e}"));
             assert_eq!(file.replica_version.as_deref(), Some(version));

@@ -841,7 +841,12 @@ mod tests {
     #[test]
     fn every_released_history_opens_with_every_row_kept() {
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/releases");
-        for (version, has_clashes) in [("0.1.0", false), ("0.2.0", true), ("0.3.0", true)] {
+        for (version, has_clashes) in [
+            ("0.1.0", false),
+            ("0.2.0", true),
+            ("0.3.0", true),
+            ("0.4.0", true),
+        ] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("history.db");
             std::fs::copy(fixtures.join(version).join("history.db"), &path).unwrap();

@@ -23,7 +23,7 @@ Replica is free and open source (MIT), for Windows 10 and 11. It drives
 [restic](https://restic.net) for its snapshots and bundles a pinned copy, so there's nothing else
 to install.
 
-> **Status:** version 0.3.0: download it from
+> **Status:** version 0.4.0: download it from
 > [Releases](https://github.com/Suremise/replica/releases) ([Installing](#installing), below).
 > It isn't code-signed yet, so check the download against its `SHA256SUMS.txt`
 > ([SmartScreen and checksums](#smartscreen-and-checksums)).

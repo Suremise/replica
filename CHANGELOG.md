@@ -6,6 +6,24 @@ All notable changes to Replica are recorded here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-13
+
+Schedules gets a page of its own where you set each job's schedule, every table fills the window
+and is paged, and Replica can tell you when there's a new release.
+
+**Not signed yet:** Windows SmartScreen may warn the first time you run the installer or the
+exes ("Windows protected your PC"). Check the download against the release's `SHA256SUMS.txt`
+first (`sha256sum -c SHA256SUMS.txt --ignore-missing`, or compare `Get-FileHash <file>` with
+it), and if it matches, choose **More info**, then **Run anyway**.
+
+Installing it over 0.3.0 keeps your settings, jobs, history and saved passwords.
+
+**If you've used Replica before:** **Settings** has moved from the Tools menu to the window's
+sidebar, beside a new **Schedules** page that holds Replica's Task Scheduler tasks (which were
+in Settings). The Tools menu holds only Windows Task Scheduler. **Check for updates** is off
+until you turn it on (Settings > General, or the tray menu); **Check now** in About asks once
+whenever you like.
+
 ### Added
 
 - The Schedules page sets a job's schedule: choose the job, then when it runs, with the job
