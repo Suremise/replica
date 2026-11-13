@@ -202,6 +202,15 @@ A job's schedule is one of:
 Without a schedule, a job runs only when you ask. A run missed while the PC was off runs once,
 when Replica is back; it isn't repeated for each missed time.
 
+You set a job's schedule in its editor (**Schedule and retention**), or on the **Schedules** page
+(in the sidebar, Ctrl+4): choose the **Job**, then how it **Runs** (**Only when I run it**,
+**Every day**, **On chosen days**, **At an interval**, or **As typed** in the form above), with the
+same choices as the editor. The page says when the job next runs and what runs it. A versioned
+job that checks its backup can be read (an after step in the editor) has that check's schedule
+there too: **After every backup**, or one of its own. **Save** writes the change as the editor's
+Save does, and **Cancel** puts it back; choosing another job with changes unsaved asks first.
+**Edit job…** opens the editor for everything else, such as retention.
+
 **What runs the schedules** is set in **Settings > Scheduling** (**Settings** in the sidebar,
 Ctrl+,):
 
@@ -209,12 +218,11 @@ Ctrl+,):
   **Start with Windows** on (in the tray menu or Settings) so it always is.
 - **Windows Task Scheduler (off by default):** Replica makes a task for each scheduled job, in Task
   Scheduler's "Replica" folder, for your account only and with no admin rights. Backups then run
-  even when the tray app isn't running, **while you're logged on**. The **Schedules** page (in the
-  sidebar, Ctrl+4) shows every task, with its next and last run, and lets you turn each on or off,
-  delete one or all, or open Task Scheduler itself. A task whose job is gone is flagged. Turning
-  the option off
-  asks whether to delete the tasks (the default) or keep them turned off; the built-in timer then
-  takes over.
+  even when the tray app isn't running, **while you're logged on**. The **Schedules** page lists
+  every task under **Task Scheduler tasks**, with its next and last run, and lets you turn each on
+  or off, delete one or all, or open Task Scheduler itself. A task whose job is gone is flagged.
+  Turning the option off asks whether to delete the tasks (the default) or keep them turned off;
+  the built-in timer then takes over.
 
 The two never both run a job, and a job never runs twice at once: a second run while one is going
 is skipped. **Pause schedules** (tray menu or Settings) stops scheduled runs, by the timer and by

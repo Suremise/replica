@@ -613,7 +613,29 @@ impl Shell {
             Tab::Jobs => self.jobs.ui(ui),
             Tab::History => self.history.ui(ui),
             Tab::Restore => self.restore.ui(ui),
-            Tab::Schedules => self.schedules.ui(ui),
+            Tab::Schedules => {
+                self.schedules.ui(ui);
+                use super::schedules::Request;
+                match self.schedules.request.take() {
+                    // "Edit job…" or New job: the Jobs page's editor. One already open there,
+                    // with changes of its own, is shown as it is rather than replaced.
+                    Some(request @ (Request::EditJob(_) | Request::NewJob)) => {
+                        self.tab = Tab::Jobs;
+                        if !self.jobs.editing() {
+                            self.jobs.edit(match request {
+                                Request::EditJob(job) => Some(job),
+                                _ => None,
+                            });
+                        }
+                    }
+                    // The status bar and the Jobs table follow at once.
+                    Some(Request::Saved) => {
+                        self.load();
+                        self.jobs.reload();
+                    }
+                    None => {}
+                }
+            }
             Tab::Settings => {
                 self.settings.ui(ui);
                 if std::mem::take(&mut self.settings.to_schedules) {

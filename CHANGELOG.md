@@ -8,6 +8,10 @@ All notable changes to Replica are recorded here. The format is based on
 
 ### Added
 
+- The Schedules page sets a job's schedule: choose the job, then when it runs, with the job
+  editor's own choices, and see when it next runs and what runs it. A versioned job's backup
+  check has its schedule there too. Save writes it as the editor does; Edit job… opens the
+  editor for the rest.
 - **Check for updates**, off by default (in Settings, General, and the tray menu, beside
   Start with Windows). While it's on, Replica asks GitHub which release is the latest when it
   starts and once a day while it runs, and tells you of a newer one: a notification that opens

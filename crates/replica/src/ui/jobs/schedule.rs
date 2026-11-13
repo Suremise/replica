@@ -53,6 +53,14 @@ pub struct SchedulePicker {
     pub typed: String,
     /// The text it last read or wrote: when the form's differs, it's read again.
     synced: String,
+    /// The name of the choice with no schedule: "Only when I run it" for a job; another
+    /// where no schedule means something else (an integrity check's: after every backup).
+    none_key: &'static str,
+    /// Its first row's name, which a screen reader reads as the dropdown's: "Runs" for a job;
+    /// another beside it on a page with two.
+    runs_key: &'static str,
+    /// What "As typed" says, of the forms and of what empty means.
+    hint_key: &'static str,
 }
 
 impl SchedulePicker {
@@ -65,6 +73,9 @@ impl SchedulePicker {
             hours: true,
             typed: text.to_owned(),
             synced: text.to_owned(),
+            none_key: "editor-schedule-manual",
+            runs_key: "editor-schedule-runs",
+            hint_key: "editor-schedule-hint",
         };
         let time = |t: &chrono::NaiveTime| format!("{:02}:{:02}", t.hour(), t.minute());
         if text.trim().is_empty() {
@@ -95,6 +106,21 @@ impl SchedulePicker {
         picker
     }
 
+    /// The same picker for a schedule where none means something else: its first row named by
+    /// `runs_key`, its no-schedule choice by `none_key`, and "As typed" explained by `hint_key`
+    /// (which says what empty means there).
+    pub fn with_names(
+        mut self,
+        runs_key: &'static str,
+        none_key: &'static str,
+        hint_key: &'static str,
+    ) -> Self {
+        self.runs_key = runs_key;
+        self.none_key = none_key;
+        self.hint_key = hint_key;
+        self
+    }
+
     /// The schedule's text, as core reads it (or as typed).
     pub fn to_text(&self) -> String {
         let time = self.time.trim();
@@ -118,20 +144,23 @@ impl SchedulePicker {
     /// Shows the picker's rows; writes `text` when they change it.
     pub fn ui(&mut self, ui: &mut Ui, text: &mut String) {
         if *text != self.synced {
-            *self = Self::from_text(text);
+            *self = Self::from_text(text).with_names(self.runs_key, self.none_key, self.hint_key);
         }
         let before = self.clone();
-        setting_row(ui, &tr("editor-schedule-runs"), None, |ui| {
+        setting_row(ui, &tr(self.runs_key), None, |ui| {
+            let none_key = self.none_key;
+            let name =
+                |kind: Kind, key: &str| tr(if kind == Kind::Manual { none_key } else { key });
             let current = KINDS
                 .iter()
                 .find(|(k, _)| *k == self.kind)
-                .map_or_else(String::new, |(_, key)| tr(key));
+                .map_or_else(String::new, |(kind, key)| name(*kind, key));
             egui::ComboBox::from_id_salt("schedule-kind")
                 .selected_text(current)
                 .width(200.0)
                 .show_ui(ui, |ui| {
                     for (kind, key) in KINDS {
-                        dropdown_value(ui, &mut self.kind, kind, tr(key));
+                        dropdown_value(ui, &mut self.kind, kind, name(kind, key));
                     }
                 })
                 .response
@@ -182,7 +211,7 @@ impl SchedulePicker {
                 setting_row(
                     ui,
                     &tr("editor-schedule-text"),
-                    Some(&tr("editor-schedule-hint")),
+                    Some(&tr(self.hint_key)),
                     |ui| ui.add(egui::TextEdit::singleline(&mut self.typed).desired_width(240.0)),
                 );
             }

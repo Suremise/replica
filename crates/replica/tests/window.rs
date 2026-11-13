@@ -1,4 +1,4 @@
-//! The window's Jobs, History and Restore tabs and the job editor, driven through egui's accessibility tree (what
+//! The window's Jobs, History, Restore and Schedules pages and the job editor, driven through egui's accessibility tree (what
 //! Narrator reads) with `egui_kittest`, against a fake backend: settings in a temp folder,
 //! secrets in memory, and the tray, Task Scheduler and restic recorded instead of run.
 
@@ -18,6 +18,7 @@ use replica::ui::history::HistoryTab;
 use replica::ui::jobs::JobsTab;
 use replica::ui::jobs::editor::{Editor, EditorResult};
 use replica::ui::restore::{Done, RestoreTab};
+use replica::ui::schedules::SchedulesTab;
 use replica_core::cancel::CancelToken;
 use replica_core::history::{HistoryFilter, RunRecord, TargetRecord, TestRestoreRecord};
 use replica_core::job::{Job, Mode, Source, Target, VolumeRef};
@@ -2313,4 +2314,391 @@ fn importing_a_nas_job_previews_and_imports_with_every_frame_s_names_resolving()
     step_checking_names_until(&mut harness, "Name exists", "the second preview opening");
     harness.run();
     harness.get_by_label("Import 0 jobs");
+}
+
+// --- The Schedules page: a job's schedule ---------------------------------------------------
+
+/// "docs", versioned, daily at 02:30 with a weekly integrity check; "music", a mirror that's
+/// off, with no schedule.
+fn schedule_jobs() -> Vec<Job> {
+    let mut docs = job("docs", Mode::Versioned);
+    docs.schedule = Some("daily 02:30".parse().unwrap());
+    docs.after.push(replica_core::job::AfterStep::Verify {
+        schedule: Some("weekly sun 03:00".parse().unwrap()),
+        read_data_subset: "5%".into(),
+    });
+    let mut music = job("music", Mode::Mirror);
+    music.enabled = false;
+    vec![docs, music]
+}
+
+fn schedules_harness(fake: &Arc<Fake>) -> Harness<'static, SchedulesTab> {
+    let mut harness = Harness::builder()
+        .with_size([1100.0, 1600.0])
+        .with_context_setup(setup)
+        .build_ui_state(
+            |ui, tab: &mut SchedulesTab| tab.ui(ui),
+            SchedulesTab::new(Arc::clone(fake) as Arc<dyn Backend>),
+        );
+    step_until(&mut harness, |h| h.query_by_label("Edit job…").is_some());
+    settle(&mut harness);
+    harness
+}
+
+/// The value a node shows: a dropdown's choice, a field's text.
+fn value_of<S>(
+    harness: &Harness<'_, S>,
+    role: eframe::egui::accesskit::Role,
+    name: &str,
+) -> String {
+    use egui_kittest::kittest::NodeT;
+    harness
+        .get_by_role_and_label(role, name)
+        .accesskit_node()
+        .value()
+        .unwrap_or_default()
+}
+
+/// Opens the dropdown `name` and chooses `choice` in it, as a screen reader does.
+fn pick<S>(harness: &mut Harness<'_, S>, name: &str, choice: &str) {
+    use eframe::egui::accesskit::Role;
+    harness
+        .get_by_role_and_label(Role::ComboBox, name)
+        .click_accesskit();
+    step_until(harness, |h| h.query_by_label(choice).is_some());
+    harness.get_by_label(choice).click_accesskit();
+    step_until(harness, |h| !eframe::egui::Popup::is_any_open(&h.ctx));
+    settle(harness);
+}
+
+#[test]
+fn the_schedules_page_shows_the_chosen_job_s_schedules() {
+    use eframe::egui::accesskit::Role;
+    let (fake, _dir) = backend(schedule_jobs());
+    let mut harness = schedules_harness(&fake);
+    // The first job, its schedule and its check's, and what runs it.
+    assert_eq!(value_of(&harness, Role::ComboBox, "Runs"), "Every day");
+    // The job's time first, then its check's.
+    let times: Vec<String> = harness
+        .query_all_by_role_and_label(Role::TextInput, "At (24-hour, such as 02:30)")
+        .map(|n| {
+            use egui_kittest::kittest::NodeT;
+            n.accesskit_node().value().unwrap_or_default()
+        })
+        .collect();
+    assert_eq!(times, ["02:30", "03:00"]);
+    assert_eq!(
+        value_of(&harness, Role::ComboBox, "Check runs"),
+        "On chosen days"
+    );
+    harness.get_by_label("Built-in timer");
+    harness.check_accessibility();
+
+    // A job that's off says so; with no schedule, it runs only when asked.
+    pick(&mut harness, "Job", "music (off)");
+    assert_eq!(harness.state().job.as_deref(), Some("music"));
+    assert_eq!(
+        value_of(&harness, Role::ComboBox, "Runs"),
+        "Only when I run it"
+    );
+    assert!(
+        harness.query_by_label("Check runs").is_none(),
+        "a mirror has no integrity check"
+    );
+}
+
+#[test]
+fn saving_a_schedule_writes_what_the_editor_would_and_tells_the_tray() {
+    use eframe::egui::accesskit::Role;
+    let (fake, _dir) = backend(schedule_jobs());
+    let mut harness = schedules_harness(&fake);
+    pick(&mut harness, "Runs", "At an interval");
+    harness.get_by_label("Save to see when it next runs.");
+    pick(&mut harness, "Check runs", "After every backup");
+    harness.get_by_label("Save").click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("The schedule of docs is saved.").is_some()
+    });
+    let saved = std::fs::read_to_string(fake.settings_file()).unwrap();
+    assert_eq!(*fake.requests.lock().unwrap(), [UiRequest::Reload]);
+    assert_eq!(value_of(&harness, Role::ComboBox, "Runs"), "At an interval");
+
+    // The editor, saving the same change to the same job, writes the same file.
+    let (other, _other_dir) = backend(schedule_jobs());
+    let mut editor = editor_harness(&other, Some(schedule_jobs()[0].clone()));
+    editor.run();
+    let form = &mut editor.state_mut().0.form;
+    form.schedule = "every 6h".into();
+    for step in &mut form.after {
+        if let replica::ui::jobs::form::AfterForm::Verify { schedule, .. } = step {
+            schedule.clear();
+        }
+    }
+    editor.get_by_label("Save").click();
+    editor.run();
+    assert_eq!(editor.state().1, EditorResult::Saved("docs".into()));
+    assert_eq!(
+        saved,
+        std::fs::read_to_string(other.settings_file()).unwrap()
+    );
+    let docs = &saved_jobs(&fake)[0];
+    assert_eq!(docs.schedule.as_ref().unwrap().to_string(), "every 6h");
+    assert!(matches!(
+        docs.after[..],
+        [replica_core::job::AfterStep::Verify { schedule: None, .. }]
+    ));
+}
+
+#[test]
+fn cancel_and_an_unreadable_schedule_save_nothing() {
+    use eframe::egui::accesskit::Role;
+    let (fake, _dir) = backend(schedule_jobs());
+    let before = std::fs::read_to_string(fake.settings_file()).unwrap();
+    let mut harness = schedules_harness(&fake);
+
+    pick(&mut harness, "Runs", "At an interval");
+    harness.get_by_label("Cancel").click_accesskit();
+    step_until(&mut harness, |h| {
+        value_of(h, Role::ComboBox, "Runs") == "Every day"
+    });
+
+    pick(&mut harness, "Runs", "As typed");
+    harness
+        .get_by_role_and_label(Role::TextInput, "Schedule")
+        .set_text_value_accesskit("now and then");
+    settle(&mut harness);
+    harness.get_by_label("Save").click_accesskit();
+    // Core's message, as the editor shows it: with a capital.
+    let error = "now and then"
+        .parse::<replica_core::schedule::Schedule>()
+        .unwrap_err()
+        .to_string();
+    let mut chars = error.chars();
+    let shown: String = chars.next().unwrap().to_uppercase().chain(chars).collect();
+    step_until(&mut harness, |h| h.query_by_label(&shown).is_some());
+    assert_eq!(
+        before,
+        std::fs::read_to_string(fake.settings_file()).unwrap(),
+        "nothing written"
+    );
+    assert!(
+        fake.requests.lock().unwrap().is_empty(),
+        "the tray isn't told"
+    );
+}
+
+#[test]
+fn switching_job_with_changes_asks_first_and_edit_job_opens_the_editor() {
+    use eframe::egui::accesskit::Role;
+    use replica::ui::schedules::Request;
+    let (fake, _dir) = backend(schedule_jobs());
+    let mut harness = schedules_harness(&fake);
+    pick(&mut harness, "Runs", "At an interval");
+
+    pick(&mut harness, "Job", "music (off)");
+    step_until(&mut harness, |h| {
+        h.query_by_label("Discard changes?").is_some()
+    });
+    harness.get_by_label("Keep editing").click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("Discard changes?").is_none()
+    });
+    assert_eq!(harness.state().job.as_deref(), Some("docs"), "still docs");
+    assert_eq!(value_of(&harness, Role::ComboBox, "Runs"), "At an interval");
+
+    pick(&mut harness, "Job", "music (off)");
+    step_until(&mut harness, |h| {
+        h.query_by_label("Discard changes?").is_some()
+    });
+    harness.get_by_label("Discard changes").click_accesskit();
+    step_until(&mut harness, |h| {
+        value_of(h, Role::ComboBox, "Job") == "music (off)"
+    });
+    assert_eq!(
+        value_of(&harness, Role::ComboBox, "Runs"),
+        "Only when I run it"
+    );
+
+    harness.get_by_label("Edit job…").click_accesskit();
+    step_until(&mut harness, |h| h.state().request.is_some());
+    assert_eq!(
+        harness.state().request,
+        Some(Request::EditJob(schedule_jobs()[1].clone()))
+    );
+}
+
+#[test]
+fn with_no_jobs_the_schedules_page_points_to_new_job() {
+    use replica::ui::schedules::Request;
+    let (fake, _dir) = backend(vec![]);
+    let mut harness = Harness::builder()
+        .with_size([1100.0, 1200.0])
+        .with_context_setup(setup)
+        .build_ui_state(
+            |ui, tab: &mut SchedulesTab| tab.ui(ui),
+            SchedulesTab::new(Arc::clone(&fake) as Arc<dyn Backend>),
+        );
+    step_until(&mut harness, |h| h.query_by_label("No jobs yet").is_some());
+    harness.get_by_label("New job").click_accesskit();
+    step_until(&mut harness, |h| h.state().request.is_some());
+    assert_eq!(harness.state().request, Some(Request::NewJob));
+}
+
+/// Changes the saved settings behind the page's back, as the Jobs page or another copy would.
+fn change_saved(fake: &Fake, edit: impl FnOnce(&mut Settings)) {
+    let mut settings = Settings::load(&fake.settings_file()).unwrap().settings;
+    edit(&mut settings);
+    settings.save(&fake.settings_file()).unwrap();
+}
+
+#[test]
+fn saving_a_schedule_changes_only_the_schedules_of_the_job_as_it_s_saved_now() {
+    let (fake, _dir) = backend(schedule_jobs());
+    let mut harness = schedules_harness(&fake);
+    // A change here, not saved yet...
+    pick(&mut harness, "Runs", "At an interval");
+    pick(&mut harness, "Check runs", "After every backup");
+    // ...while the job is turned off and given another source and target elsewhere.
+    change_saved(&fake, |s| {
+        let docs = &mut s.jobs[0];
+        docs.enabled = false;
+        docs.sources[0].path = r"C:\Elsewhere".into();
+        docs.targets = vec![drive("SPARE")];
+    });
+    harness.get_by_label("Save").click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("The schedule of docs is saved.").is_some()
+    });
+    let docs = &saved_jobs(&fake)[0];
+    assert!(!docs.enabled, "still off");
+    assert_eq!(docs.sources[0].path, Path::new(r"C:\Elsewhere"));
+    assert_eq!(docs.targets, [drive("SPARE")]);
+    // And only its schedules are the page's.
+    assert_eq!(docs.schedule.as_ref().unwrap().to_string(), "every 6h");
+    assert!(matches!(
+        docs.after[..],
+        [replica_core::job::AfterStep::Verify { schedule: None, .. }]
+    ));
+}
+
+#[test]
+fn a_job_whose_checks_changed_or_that_s_gone_isn_t_saved_over() {
+    let (fake, _dir) = backend(schedule_jobs());
+    let mut harness = schedules_harness(&fake);
+
+    // Its check removed elsewhere: the page's can't be put anywhere.
+    pick(&mut harness, "Check runs", "After every backup");
+    change_saved(&fake, |s| s.jobs[0].after.clear());
+    let before = std::fs::read_to_string(fake.settings_file()).unwrap();
+    harness.get_by_label("Save").click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label_contains("were changed elsewhere while you were editing")
+            .is_some()
+    });
+    assert_eq!(
+        before,
+        std::fs::read_to_string(fake.settings_file()).unwrap()
+    );
+    assert!(
+        harness.query_by_label("Check runs").is_none(),
+        "shown as it's saved now"
+    );
+
+    // Deleted elsewhere: not added back.
+    pick(&mut harness, "Runs", "At an interval");
+    change_saved(&fake, |s| s.jobs.remove(0).name.clear());
+    let before = std::fs::read_to_string(fake.settings_file()).unwrap();
+    harness.get_by_label("Save").click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label_contains("isn't in the settings any more")
+            .is_some()
+    });
+    assert_eq!(
+        before,
+        std::fs::read_to_string(fake.settings_file()).unwrap()
+    );
+    assert_eq!(saved_jobs(&fake).len(), 1, "docs isn't added back");
+    assert!(fake.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn as_typed_says_what_empty_means_for_a_job_and_for_its_check() {
+    let (fake, _dir) = backend(schedule_jobs());
+    let mut harness = schedules_harness(&fake);
+    pick(&mut harness, "Runs", "As typed");
+    pick(&mut harness, "Check runs", "As typed");
+    // Each "As typed" field's description: the job's first, then its check's.
+    let hints: Vec<String> = harness
+        .query_all_by_role_and_label(eframe::egui::accesskit::Role::TextInput, "Schedule")
+        .map(|n| {
+            use egui_kittest::kittest::NodeT;
+            n.accesskit_node()
+                .description()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(hints.len(), 2, "{hints:?}");
+    assert!(hints[0].contains("only by hand"), "the job's: {hints:?}");
+    assert!(
+        hints[1].contains("after every backup") && !hints[1].contains("by hand"),
+        "the check's: {hints:?}"
+    );
+}
+
+#[test]
+fn checks_reordered_or_replaced_elsewhere_aren_t_given_each_other_s_schedules() {
+    use replica_core::job::AfterStep;
+    let verify = |schedule: &str, subset: &str| AfterStep::Verify {
+        schedule: Some(schedule.parse().unwrap()),
+        read_data_subset: subset.into(),
+    };
+    let mut jobs = schedule_jobs();
+    jobs[0].after = vec![
+        verify("weekly sun 03:00", "5%"),
+        verify("weekly sat 04:00", "100%"),
+    ];
+    for change in [
+        // The two the other way round: as many checks, each now the other's.
+        |after: &mut Vec<AfterStep>| after.reverse(),
+        // One removed and another added: as many checks again.
+        |after: &mut Vec<AfterStep>| {
+            after.remove(0);
+            after.push(AfterStep::Verify {
+                schedule: None,
+                read_data_subset: "1/10".into(),
+            });
+        },
+    ] {
+        let (fake, _dir) = backend(jobs.clone());
+        let mut harness = schedules_harness(&fake);
+        let first = "Check runs";
+        harness
+            .get_all_by_role_and_label(eframe::egui::accesskit::Role::ComboBox, first)
+            .next()
+            .unwrap()
+            .click_accesskit();
+        step_until(&mut harness, |h| {
+            h.query_by_label("After every backup").is_some()
+        });
+        harness.get_by_label("After every backup").click_accesskit();
+        step_until(&mut harness, |h| !eframe::egui::Popup::is_any_open(&h.ctx));
+        settle(&mut harness);
+        change_saved(&fake, |s| change(&mut s.jobs[0].after));
+        let before = std::fs::read_to_string(fake.settings_file()).unwrap();
+        harness.get_by_label("Save").click_accesskit();
+        step_until(&mut harness, |h| {
+            h.query_by_label_contains("were changed elsewhere while you were editing")
+                .is_some()
+        });
+        assert_eq!(
+            before,
+            std::fs::read_to_string(fake.settings_file()).unwrap(),
+            "nothing written"
+        );
+        assert!(
+            fake.requests.lock().unwrap().is_empty(),
+            "the tray isn't told"
+        );
+    }
 }

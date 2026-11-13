@@ -403,14 +403,7 @@ impl Editor {
 
     /// Where core's `error` is shown: next to what it's about if it's about `job`.
     fn issue(&self, error: &ValidationError, job: &Job) -> Issue {
-        let ours = match (&error.job, &error.problem) {
-            // The other job of the two, by the name typed here.
-            (_, Problem::NameDuplicate(n)) => n.eq_ignore_ascii_case(&job.name),
-            (Some(label), _) if job.name.is_empty() => label.starts_with("jobs["),
-            (Some(label), _) => label.eq_ignore_ascii_case(&job.name),
-            (None, _) => false,
-        };
-        if !ours {
+        if !is_about(error, job) {
             return Issue::general(error.to_string());
         }
         let target_at = |pred: &dyn Fn(&TargetForm) -> bool| {
@@ -459,20 +452,7 @@ impl Editor {
 
     /// The settings on disk now, with `job` in place of the one edited (or added).
     fn with_job(&self, job: &Job) -> Result<Settings, String> {
-        let mut settings = Settings::load_or_default(&self.backend.settings_file())
-            .map_err(|e| e.to_string())?
-            .settings;
-        let at = self.original.as_ref().and_then(|o| {
-            settings
-                .jobs
-                .iter()
-                .position(|j| j.name.eq_ignore_ascii_case(&o.name))
-        });
-        match at {
-            Some(i) => settings.jobs[i] = job.clone(),
-            None => settings.jobs.push(job.clone()),
-        }
-        Ok(settings)
+        settings_with(self.backend.as_ref(), self.original.as_ref(), job)
     }
 
     /// Saves the shares' logins being typed to Credential Manager.
@@ -619,10 +599,7 @@ impl Editor {
     fn commit(&mut self) -> Result<String, Vec<Issue>> {
         let job = self.validated()?;
         let settings = self.with_job(&job).map_err(|e| vec![Issue::general(e)])?;
-        settings
-            .save(&self.backend.settings_file())
-            .map_err(|e| vec![Issue::general(e.to_string())])?;
-        self.backend.send(UiRequest::Reload);
+        write(self.backend.as_ref(), &settings).map_err(|e| vec![Issue::general(e)])?;
         Ok(job.name)
     }
 
@@ -1315,4 +1292,79 @@ fn sentence(text: &str) -> String {
         Some(first) => first.to_uppercase().chain(chars).collect(),
         None => String::new(),
     }
+}
+
+// --- Saving a job, for the editor and the Schedules page --------------------------------
+
+/// The settings on disk now, with `job` in place of `original` (or added, for a new one).
+fn settings_with(
+    backend: &dyn Backend,
+    original: Option<&Job>,
+    job: &Job,
+) -> Result<Settings, String> {
+    let mut settings = Settings::load_or_default(&backend.settings_file())
+        .map_err(|e| e.to_string())?
+        .settings;
+    let at = original.and_then(|o| {
+        settings
+            .jobs
+            .iter()
+            .position(|j| j.name.eq_ignore_ascii_case(&o.name))
+    });
+    match at {
+        Some(i) => settings.jobs[i] = job.clone(),
+        None => settings.jobs.push(job.clone()),
+    }
+    Ok(settings)
+}
+
+/// Saves the settings and tells the tray, which brings the jobs' tasks in line.
+fn write(backend: &dyn Backend, settings: &Settings) -> Result<(), String> {
+    settings
+        .save(&backend.settings_file())
+        .map_err(|e| e.to_string())?;
+    backend.send(UiRequest::Reload);
+    Ok(())
+}
+
+/// Whether core's `error` is about `job` (shown as its problem alone), not another job.
+fn is_about(error: &ValidationError, job: &Job) -> bool {
+    match (&error.job, &error.problem) {
+        // The other job of the two, by the name typed here.
+        (_, Problem::NameDuplicate(n)) => n.eq_ignore_ascii_case(&job.name),
+        (Some(label), _) if job.name.is_empty() => label.starts_with("jobs["),
+        (Some(label), _) => label.eq_ignore_ascii_case(&job.name),
+        (None, _) => false,
+    }
+}
+
+/// Saves `form` in place of the job `original` as the editor's Save does: core reads the
+/// form, the job goes into the settings as they are on disk now, core checks them, they're
+/// saved, and the tray is told. Its name, or the messages the editor would show, as it shows
+/// them. For a page that changes what the editor can (the Schedules page): nothing here sets
+/// up targets, so it's only for changes that leave them as they are.
+pub fn save_job(
+    backend: &dyn Backend,
+    original: &Job,
+    form: &JobForm,
+) -> Result<String, Vec<String>> {
+    let job = form
+        .to_job()
+        .map_err(|errors| errors.iter().map(|e| sentence(e)).collect::<Vec<_>>())?;
+    let settings = settings_with(backend, Some(original), &job).map_err(|e| vec![e])?;
+    let errors = settings.validate();
+    if !errors.is_empty() {
+        return Err(errors
+            .iter()
+            .map(|e| {
+                sentence(&if is_about(e, &job) {
+                    e.problem.to_string()
+                } else {
+                    e.to_string()
+                })
+            })
+            .collect());
+    }
+    write(backend, &settings).map_err(|e| vec![e])?;
+    Ok(job.name)
 }

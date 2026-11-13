@@ -32,7 +32,7 @@ nav-pages = Pages
 page-jobs-subtitle = What Replica backs up, where to, and when
 page-history-subtitle = Every run and test restore, newest first
 page-restore-subtitle = Get files back from a backup
-page-schedules-subtitle = Replica's tasks in Windows Task Scheduler
+page-schedules-subtitle = When each job runs, and Replica's tasks in Task Scheduler
 page-settings-subtitle = How Replica runs, and where it keeps its files
 page-about-subtitle = The version, updates, the licence and the third-party notices
 
@@ -425,6 +425,31 @@ settings-reset-body =
     defaults, and Task Scheduler is turned off with its tasks deleted. Your jobs stay as they
     are, and so do their backups.
 settings-reset-done = The settings are back to their defaults. Your jobs are unchanged.
+
+## The Schedules page: a job's schedule
+
+schedules-job-title = Schedule
+schedules-job-help = When a job runs on its own. Everything else about it is in the job editor.
+schedules-job = Job
+# A job that's turned off, in the job picker.
+schedules-job-off = { $job } (off)
+schedules-edit-job = Edit job…
+schedules-next = Next run
+schedules-save-to-see = Save to see when it next runs.
+schedules-runs-by = Run by
+schedules-check = Check the backup can be read
+# When the job has more than one such check.
+schedules-check-numbered = Check the backup can be read ({ $n })
+schedules-check-help = restic reads back part of the backup to check it, on this schedule.
+# The integrity check's schedule picker: its first row, and its choice with no schedule of its own.
+schedules-check-runs = Check runs
+schedules-check-hint = When the check runs. Leave it empty to run it after every backup. For example: daily 02:30, weekly sun 03:00, every 24h
+schedules-check-every-backup = After every backup
+schedules-saved = The schedule of { $job } is saved.
+schedules-job-gone = The job { $job } isn't in the settings any more, so its schedule wasn't saved.
+schedules-checks-changed = The steps after the backup of { $job }, its checks among them, were changed elsewhere while you were editing, so its schedules weren't saved. They're shown as saved now.
+schedules-no-jobs-title = No jobs yet
+schedules-no-jobs = Add a job, then choose when it runs here.
 
 ## The Schedules page: Replica's tasks in Task Scheduler
 

@@ -481,3 +481,56 @@ fn a_setup_that_fails_after_making_tasks_still_removes_them() {
         "{folder} is removed"
     );
 }
+
+#[test]
+fn a_schedule_saved_on_the_schedules_page_changes_its_task_as_the_editor_s_save_does() {
+    use egui_kittest::kittest::NodeT;
+    use replica::tray::runner::reconcile_tasks;
+    let f = Fixture::new("schedule");
+    let mut harness = f.schedules(1300.0);
+    step_until(&mut harness, |h| h.query_by_label("Edit job…").is_some());
+    settle(&mut harness);
+    let _ = f.reloads();
+    let docs = |f: &Fixture| {
+        f.tasks
+            .0
+            .list(&["docs"])
+            .unwrap()
+            .into_iter()
+            .find(|t| t.name == "docs")
+            .and_then(|t| t.schedule)
+    };
+    let before = docs(&f);
+
+    // Docs every 6 hours, rather than daily at 02:30.
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Runs")
+        .click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_label("At an interval").is_some()
+    });
+    harness.get_by_label("At an interval").click_accesskit();
+    step_until(&mut harness, |h| {
+        h.query_by_role_and_label(egui::accesskit::Role::ComboBox, "Runs")
+            .is_some_and(|n| n.accesskit_node().value().as_deref() == Some("At an interval"))
+    });
+    harness.get_by_label("Save").click_accesskit();
+    step_until(&mut harness, |_| {
+        f.settings().jobs[0]
+            .schedule
+            .as_ref()
+            .is_some_and(|s| s.to_string() == "every 6h")
+    });
+    assert_eq!(
+        f.reloads(),
+        1,
+        "the tray is told, as after the editor's Save"
+    );
+
+    // What the tray does on that Reload: its task follows the new schedule.
+    let exe = f.temp.path().join("not-run").join("replica-tray.exe");
+    reconcile_tasks(&f.tasks.0, &f.settings(), &exe).unwrap();
+    let after = docs(&f);
+    assert_ne!(after, before, "the task's trigger changed");
+    assert_eq!(after.as_deref(), Some("every 6h"));
+}

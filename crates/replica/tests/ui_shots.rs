@@ -1330,6 +1330,85 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
     ));
     screens.extend(long_name_screens());
     screens.extend(transfer_screens());
+    screens.extend(schedule_screens());
+    screens
+}
+
+/// The Schedules page with Documents' schedule of each kind, a check schedule beside it, an
+/// unreadable typed one's message, and no jobs at all.
+fn schedule_screens<'a>() -> Vec<(&'static str, Shoot<'a>)> {
+    use replica_core::schedule::Schedule;
+    // The settings the fixture saves, with Documents' schedule changed by `edit`.
+    fn shot(v: Variant, path: &Path, edit: impl FnOnce(&mut Settings), typed: Option<&str>) {
+        use eframe::egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        let fixture = Fixture::new();
+        let file = fixture.backend.settings_file();
+        let mut settings = Settings::load(&file).unwrap().settings;
+        edit(&mut settings);
+        settings.save(&file).unwrap();
+        let mut harness = v.builder(1100.0).build_ui_state(
+            |ui, shell: &mut Shell| shell.show(ui),
+            fixture.shell(Tab::Schedules),
+        );
+        let _ = harness.try_run();
+        if let Some(text) = typed {
+            harness
+                .get_by_role_and_label(Role::ComboBox, "Runs")
+                .click_accesskit();
+            let _ = harness.try_run();
+            harness.get_by_label("As typed").click_accesskit();
+            let _ = harness.try_run();
+            harness
+                .get_by_role_and_label(Role::TextInput, "Schedule")
+                .set_text_value_accesskit(text);
+            let _ = harness.try_run();
+            harness.get_by_label("Save").click_accesskit();
+            let _ = harness.try_run();
+        }
+        save(&mut harness, v.scale, path);
+    }
+    let schedule = |text: &'static str| -> Option<Schedule> {
+        (!text.is_empty()).then(|| text.parse().unwrap())
+    };
+    let mut screens: Vec<(&'static str, Shoot<'a>)> = Vec::new();
+    for (name, text) in [
+        ("schedules-job-manual", ""),
+        ("schedules-job-daily", "daily 02:30"),
+        ("schedules-job-weekly", "weekly mon,thu 21:00"),
+        ("schedules-job-every", "every 90m"),
+    ] {
+        screens.push((
+            name,
+            Box::new(move |v: Variant, path: &Path| {
+                shot(v, path, |s| s.jobs[0].schedule = schedule(text), None);
+            }),
+        ));
+    }
+    screens.push((
+        "schedules-job-check",
+        Box::new(move |v: Variant, path: &Path| {
+            shot(
+                v,
+                path,
+                |s| {
+                    s.jobs[0].after.push(AfterStep::Verify {
+                        schedule: schedule("weekly sun 03:00"),
+                        read_data_subset: "5%".into(),
+                    });
+                },
+                None,
+            );
+        }),
+    ));
+    screens.push((
+        "schedules-job-typed-error",
+        Box::new(|v: Variant, path: &Path| shot(v, path, |_| {}, Some("now and then"))),
+    ));
+    screens.push((
+        "schedules-no-jobs",
+        Box::new(|v: Variant, path: &Path| shot(v, path, |s| s.jobs.clear(), None)),
+    ));
     screens
 }
 

@@ -169,6 +169,11 @@ impl JobsTab {
         self.editor.as_mut()
     }
 
+    /// Reads the settings again now: they were changed on another page.
+    pub fn reload(&mut self) {
+        self.load();
+    }
+
     fn load(&mut self) {
         let path = self.backend.settings_file();
         self.stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();

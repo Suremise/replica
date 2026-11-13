@@ -1260,8 +1260,29 @@ tab keeps its own scroll place.
   title) and Reset (a danger button). A confirmation's deleting choice is the filled red
   button.
 
-**The Schedules page (`ui/schedules.rs`, in the sidebar; nothing hidden, so it lists the tasks
-whatever runs the schedules):** every task in
+**The Schedules page (`ui/schedules.rs`, in the sidebar)** has two cards. **Schedule** sets a
+job's schedules: a Job dropdown as Restore's (a job that's off says so; the choice is kept while
+the app runs, `SchedulesTab::show_job` preselects one), then the job editor's own
+`jobs::schedule::SchedulePicker` on a `JobForm::from_job` of the saved job, and one more for each
+of its verify after-steps (`SchedulePicker::with_names`: "Check runs", "After every backup"
+for no schedule, which is what `Verify { schedule: None }` means, and an "As typed" hint that
+says so). Under them, the saved job's
+next run (`jobs::next_run_text`, as the Jobs table says it) and what runs it. Save goes through
+`jobs::editor::save_job`, the editor's own path (core reads the form, the job goes into the
+settings as on disk now, `Settings::validate`, save, `Reload`, its messages as the editor shows
+them), then asks the frame to read the settings again at once (`schedules::Request::Saved`).
+Save puts only the draft's schedules onto **the job as it's saved now**, read at Save, never
+the copy the draft started from: a job turned off or edited elsewhere meanwhile keeps those
+changes. A job that's gone isn't added back, and one whose after steps changed at all since
+the draft began (a check added, removed, reordered or replaced: which check a schedule was for
+can't be known) isn't saved over; either says why, and the page shows the jobs as they are. Only schedules
+change, so no target is set up. Choosing another job with changes unsaved asks
+with the editor's "Discard changes?"; another page keeps them, as the editor's do. "Edit job…"
+and the no-jobs New job open the Jobs page's editor (`Request::EditJob`, `Request::NewJob`),
+never over one already open there. Retention stays in the editor.
+
+**Task Scheduler tasks** (nothing hidden, so it lists the tasks whatever runs the schedules):
+every task in
 Replica's Task Scheduler folder (`Scheduler::list`), with its job, schedule, next and last run
 (with Replica's exit code in words, or Task Scheduler's own code) and on/off. A task whose job
 is gone is flagged **"No such job any more"**. Each can be turned on or off, or deleted (after a
@@ -1337,7 +1358,8 @@ example the same variable: it uses that prefix and leaves it for its owner to re
 - `crates/replica/tests/window_settings.rs` drives the Settings and Schedules pages against the
   real backend and the **real Task Scheduler in a test-only `\ReplicaTest-<pid>-<time>-<test>`
   folder**, emptied and removed when each test ends: the Schedules page lists the tasks and flags
-  an orphan, turns one off and on, deletes one (Cancel first) and removes all; turning Task
+  an orphan, turns one off and on, deletes one (Cancel first) and removes all, and a schedule
+  saved there changes the job's task once the tray reconciles (`reconcile_tasks`); turning Task
   Scheduler off deletes the tasks, or keeps them turned off; every setting round-trips through
   `settings.toml` with `Reload` sent, and Reset keeps the jobs. Its `TaskFolder` guard is made
   before the first task is, and a test panics after registering one to show the folder still

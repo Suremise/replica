@@ -356,7 +356,10 @@ fn schedules_and_settings_are_in_the_sidebar_and_about_in_help() {
     );
 
     for (page, subtitle) in [
-        ("Schedules", "Replica's tasks in Windows Task Scheduler"),
+        (
+            "Schedules",
+            "When each job runs, and Replica's tasks in Task Scheduler",
+        ),
         ("Settings", "How Replica runs, and where it keeps its files"),
     ] {
         harness.get_by_role_and_label(Role::Tab, page).click();
@@ -793,6 +796,57 @@ fn the_status_bar_fits_the_narrowest_window() {
         .click_accesskit();
     let _ = harness.try_run();
     assert_eq!(harness.state().tab, Tab::History);
+}
+
+#[test]
+fn a_schedule_saved_on_the_schedules_page_moves_the_next_run_everywhere() {
+    let fixture = Fixture::new();
+    // Counted from the tray's start: Documents daily at 02:30, Photos every 6 h.
+    fixture.fake.status.lock().unwrap().since = Some(chrono::Utc::now());
+    let mut harness = fixture.harness();
+    harness
+        .get_by_role_and_label(Role::Tab, "Schedules")
+        .click();
+    let _ = harness.try_run();
+    assert_eq!(
+        harness
+            .get_by_role_and_label(Role::ComboBox, "Job")
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some("Documents")
+    );
+
+    // Documents every 3 hours: sooner than Photos.
+    harness
+        .get_by_role_and_label(Role::ComboBox, "Runs")
+        .click_accesskit();
+    let _ = harness.try_run();
+    harness.get_by_label("At an interval").click_accesskit();
+    let _ = harness.try_run();
+    harness.get_by_label("Every").set_value_accesskit(3.0);
+    let _ = harness.try_run();
+    harness.get_by_label("Save").click_accesskit();
+    let _ = harness.try_run();
+    harness.get_by_label("The schedule of Documents is saved.");
+    assert_eq!(
+        Settings::load(&fixture.fake.settings_file())
+            .unwrap()
+            .settings
+            .jobs[0]
+            .schedule
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        "every 3h"
+    );
+    // The page says when it next runs, and the status bar and the Jobs table agree.
+    harness.get_by_label("Next: Documents, in 3 h");
+    assert!(harness.query_all_by_label("in 3 h").count() >= 1);
+    harness.get_by_role_and_label(Role::Tab, "Jobs").click();
+    let _ = harness.try_run();
+    harness.get_by_label("Next: Documents, in 3 h");
+    harness.get_by_label("in 3 h");
 }
 
 /// Help > Check for updates and About's Check now ask the tray for a check (whatever the
