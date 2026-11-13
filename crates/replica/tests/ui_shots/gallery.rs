@@ -7,12 +7,12 @@ use replica::ui::icons::Icon;
 use replica::ui::theme::{self, MAX_CONTENT_WIDTH, space};
 use replica::ui::widgets::{
     InfoKind, Sort, TableColumn, TableState, Tone, command_button, danger_button,
-    danger_button_filled, empty_state, icon_button, info_bar, path_field, primary_button,
+    danger_button_filled, empty_state, icon_button, info_bar, pager, path_field, primary_button,
     primary_button_with_icon, progress_chip, secondary_button, section_card, segmented,
     setting_row, small_toggle, status_chip, tab_strip, table, toggle, toolbar, toolbar_separator,
 };
 
-const ICONS: [Icon; 17] = [
+const ICONS: [Icon; 21] = [
     Icon::Jobs,
     Icon::History,
     Icon::Restore,
@@ -30,6 +30,10 @@ const ICONS: [Icon; 17] = [
     Icon::Refresh,
     Icon::Export,
     Icon::Import,
+    Icon::First,
+    Icon::Previous,
+    Icon::Next,
+    Icon::Last,
 ];
 
 /// The table's rows: job, result, size.
@@ -283,6 +287,7 @@ impl Gallery {
                         }
                     },
                 );
+                pager(ui, &mut self.table, ROWS.len());
             },
         );
 
@@ -309,6 +314,7 @@ impl Gallery {
                 },
                 |_, _, _| {},
             );
+            pager(ui, &mut self.empty_table, 0);
         });
 
         section_card(ui, "Icons", None, |ui| {

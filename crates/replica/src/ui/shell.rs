@@ -37,7 +37,7 @@ use super::schedules::SchedulesTab;
 use super::settings::SettingsTab;
 use super::status_bar::{self, Facts};
 use super::theme::{self, CONTROL_RADIUS, MAX_CONTENT_WIDTH, space};
-use super::widgets::{dialog_frame, flow, heading, option_info};
+use super::widgets::{self, dialog_frame, flow, heading, option_info};
 
 /// How long the window's size and place must stay put before they're saved.
 const SETTLE: Duration = Duration::from_secs(1);
@@ -143,6 +143,8 @@ pub struct Shell {
     checked_at: Option<Instant>,
     /// The status bar turned on or off here when that couldn't be saved.
     status_bar_here: Option<bool>,
+    /// The tables' page size chosen here when that couldn't be saved.
+    page_size_here: Option<usize>,
     /// A menu command that failed, and why: shown until it's closed.
     failed: Option<String>,
     pub tab: Tab,
@@ -184,6 +186,7 @@ impl Shell {
             stamp: None,
             checked_at: None,
             status_bar_here: None,
+            page_size_here: None,
             failed: None,
             tab: Tab::Jobs,
             jobs: JobsTab::new(Arc::clone(&backend)),
@@ -214,6 +217,7 @@ impl Shell {
         self.reload_if_changed();
         let p = theme::of(ui);
         let ctx = ui.ctx().clone();
+        widgets::set_page_size(&ctx, self.page_size());
         let state = self.menu_state();
         if let Some(command) = menu::shortcuts(&ctx, &state) {
             self.apply(command, &ctx);
@@ -308,6 +312,9 @@ impl Shell {
                 }
                 self.tab(ui);
             });
+        if let Some(size) = widgets::take_chosen_page_size(&ctx) {
+            self.save_page_size(size);
+        }
         self.tray_notice(&ctx);
         self.failed_message(&ctx);
         theme::paint_focus(&ctx);
@@ -444,6 +451,31 @@ impl Shell {
             .as_ref()
             .map(|s| s.app.clone())
             .unwrap_or_default()
+    }
+
+    /// The tables' page size: as the settings say, unless chosen here and not saved.
+    pub fn page_size(&self) -> usize {
+        self.page_size_here
+            .unwrap_or_else(|| self.app().page_size() as usize)
+    }
+
+    /// Saves the page size a pager's user chose, or keeps it for this run if it can't be saved
+    /// (a read-only portable copy).
+    fn save_page_size(&mut self, size: usize) {
+        if !self.writable || self.loaded.is_err() {
+            self.page_size_here = Some(size);
+            return;
+        }
+        match change_settings(self.backend.as_ref(), |s| {
+            s.app.table_page_size = size as u32
+        }) {
+            Ok(_) => self.page_size_here = None,
+            Err(e) => {
+                self.page_size_here = Some(size);
+                self.failed = Some(e);
+            }
+        }
+        self.load();
     }
 
     /// Whether the status bar shows: as the settings say, unless turned here and not saved.

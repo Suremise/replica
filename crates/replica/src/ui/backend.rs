@@ -11,7 +11,9 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use replica_core::cancel::CancelToken;
-use replica_core::history::{HistoryFilter, RunRecord, TestRestoreRecord};
+use replica_core::history::{
+    HistoryFilter, HistoryPage, HistoryQuery, Record, RunRecord, TestRestoreRecord, page_in_memory,
+};
 use replica_core::i18n::tr;
 use replica_core::job::{Job, Target};
 use replica_core::platform::{Secret, SecretStore, TargetLocation, resolve_target};
@@ -210,6 +212,33 @@ pub trait Backend: Send + Sync {
     ) -> Result<Vec<TestRestoreRecord>, String>;
     /// Every job name in the history, old ones included.
     fn history_jobs(&self) -> Result<Vec<String>, String>;
+    /// A page of the history, runs and test restores together, as `query` lists them: `limit`
+    /// from `offset`, with how many there are; with `matches` (a search), only the entries it
+    /// keeps ([`replica_core::history::History::page`]). This one, for a stand-in backend,
+    /// pages what [`Backend::runs`] and [`Backend::test_restores`] give.
+    fn history_page(
+        &self,
+        query: &HistoryQuery,
+        offset: usize,
+        limit: usize,
+        matches: Option<&mut dyn FnMut(&Record) -> bool>,
+    ) -> Result<HistoryPage, String> {
+        let filter = HistoryFilter {
+            job: query.job.clone(),
+            outcome: query.outcome,
+        };
+        let records = self
+            .runs(&filter, usize::MAX)?
+            .into_iter()
+            .map(Record::Run)
+            .chain(
+                self.test_restores(&filter, usize::MAX)?
+                    .into_iter()
+                    .map(Record::Test),
+            )
+            .collect();
+        Ok(page_in_memory(records, query, offset, limit, matches))
+    }
 
     /// Where Replica keeps its files, for the Settings tab.
     fn places(&self) -> Places;
@@ -667,6 +696,18 @@ impl Backend for LiveBackend {
     fn history_jobs(&self) -> Result<Vec<String>, String> {
         runner::open_history(&self.paths)?
             .job_names()
+            .map_err(|e| e.to_string())
+    }
+
+    fn history_page(
+        &self,
+        query: &HistoryQuery,
+        offset: usize,
+        limit: usize,
+        matches: Option<&mut dyn FnMut(&Record) -> bool>,
+    ) -> Result<HistoryPage, String> {
+        runner::open_history(&self.paths)?
+            .page(query, offset, limit, matches)
             .map_err(|e| e.to_string())
     }
 

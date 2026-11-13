@@ -1088,11 +1088,21 @@ pub struct Sort {
 }
 
 /// What a [`table`] keeps between frames. Its caller sorts the rows by `sort`, and `selected`
-/// is a row's place in that order.
+/// is a row's place in that order (in the whole list, not the page).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TableState {
     pub sort: Option<Sort>,
     pub selected: Option<usize>,
+    /// The page shown, from 0. Its caller sets it to 0 when a filter changes; a new sort does
+    /// that itself.
+    pub page: usize,
+    /// The rows (in the whole list) the caller has loaded, for one that loads a page at a
+    /// time; `None` when it has them all. A page outside them isn't drawn: the frame is done
+    /// again once the caller has loaded it.
+    pub loaded: Option<std::ops::Range<usize>>,
+    /// The page size [`TableState::page`] was counted in, so a new size keeps its first row
+    /// in view.
+    size_seen: Option<usize>,
     /// Scroll the selected row into view next frame (it moved by the keyboard).
     scroll_to_selected: bool,
 }
@@ -1102,9 +1112,57 @@ impl TableState {
         Self {
             sort,
             selected,
-            scroll_to_selected: false,
+            ..Self::default()
         }
     }
+
+    /// The rows of the page shown, in the whole list of `rows`, with the page size the window
+    /// has now ([`page_size`]). The page follows a new size (keeping its first row in view)
+    /// and stays within the list as it shrinks, so the next frame shows the same rows.
+    pub fn page_rows(&mut self, ctx: &egui::Context, rows: usize) -> std::ops::Range<usize> {
+        let size = page_size(ctx);
+        if let Some(seen) = self.size_seen
+            && seen != size
+        {
+            self.page = self.page * seen / size;
+        }
+        self.size_seen = Some(size);
+        self.page = self.page.min(pages(rows, size) - 1);
+        let first = self.page * size;
+        first..(first + size).min(rows)
+    }
+}
+
+/// How many pages `rows` rows take, `size` a page: at least 1, an empty list being one.
+pub fn pages(rows: usize, size: usize) -> usize {
+    rows.div_ceil(size.max(1)).max(1)
+}
+
+/// Where the window keeps the tables' page size, set from the settings each frame.
+fn page_size_id() -> egui::Id {
+    egui::Id::unique("replica-table-page-size")
+}
+
+/// Where a pager leaves a new page size the user chose, for the window to save.
+fn page_size_chosen_id() -> egui::Id {
+    egui::Id::unique("replica-table-page-size-chosen")
+}
+
+/// The tables' page size: as the window set it ([`set_page_size`]), 50 until it has.
+pub fn page_size(ctx: &egui::Context) -> usize {
+    ctx.data(|d| d.get_temp::<usize>(page_size_id()))
+        .unwrap_or(50)
+        .max(1)
+}
+
+/// Sets the tables' page size (from the settings, each frame).
+pub fn set_page_size(ctx: &egui::Context, size: usize) {
+    ctx.data_mut(|d| d.insert_temp(page_size_id(), size));
+}
+
+/// The page size a pager's user chose since the last call, if any: the window saves it.
+pub fn take_chosen_page_size(ctx: &egui::Context) -> Option<usize> {
+    ctx.data_mut(|d| d.remove_temp::<usize>(page_size_chosen_id()))
 }
 
 /// What a [`table`] keeps of its columns between frames: the widths the user dragged them to
@@ -1131,11 +1189,16 @@ pub struct TableResponse {
 /// [`space::TABLE_ROW_PADDING`] above and below, and never under
 /// [`space::TABLE_ROW_MIN_HEIGHT`]; a cell's content is centred in its row's height.
 ///
+/// It shows a page of the `rows` at a time ([`TableState::page_rows`]); its [`pager`], drawn
+/// by the caller under it, turns them. `cell` and `row_name` are given rows' places in the
+/// whole list. A new sort goes back to the first page.
+///
 /// It is one stop for the keyboard, as a Windows list is: Tab reaches it, the arrow keys,
-/// Home and End move the selection, and Enter activates the row. A screen reader reads it as
-/// a list box named `name`, its rows by `row_name`, the selected one as it moves. With no rows
-/// it shows `empty` under the header. `max_height` gives it its own scroll bar; without it,
-/// it's as tall as its rows, for a page that scrolls.
+/// Home and End move the selection within the page, Page Up and Page Down turn the page, and
+/// Enter activates the row. A screen reader reads it as a list box named `name`, its rows by
+/// `row_name`, the selected one as it moves. With no rows it shows `empty` under the header.
+/// `max_height` gives it its own scroll bar; without it, it's as tall as its rows, for a page
+/// that scrolls.
 #[allow(clippy::too_many_arguments)]
 pub fn table(
     ui: &mut Ui,
@@ -1152,29 +1215,45 @@ pub fn table(
     let mut out = TableResponse::default();
     let id = ui.scope_id().with(("table", name));
     let focused = ui.memory(|m| m.has_focus(id));
+    let mut page = state.page_rows(ui.ctx(), rows);
 
     // The keys, before the rows are drawn, so the selection they move is shown this frame.
     if focused && rows > 0 {
-        let (up, down, home, end, enter) = ui.input_mut(|i| {
+        let (up, down, home, end, page_up, page_down, enter) = ui.input_mut(|i| {
             (
                 i.consume_key(egui::Modifiers::NONE, Key::ArrowUp),
                 i.consume_key(egui::Modifiers::NONE, Key::ArrowDown),
                 i.consume_key(egui::Modifiers::NONE, Key::Home),
                 i.consume_key(egui::Modifiers::NONE, Key::End),
+                i.consume_key(egui::Modifiers::NONE, Key::PageUp),
+                i.consume_key(egui::Modifiers::NONE, Key::PageDown),
                 i.consume_key(egui::Modifiers::NONE, Key::Enter),
             )
         });
-        let before = state.selected;
-        let last = rows - 1;
-        let current = state.selected.map(|s| s.min(last));
-        state.selected = match (up, down, home, end) {
-            (true, ..) => Some(current.map_or(0, |s| s.saturating_sub(1))),
-            (_, true, ..) => Some(current.map_or(0, |s| (s + 1).min(last))),
-            (_, _, true, _) => Some(0),
-            (.., true) => Some(last),
-            _ => state.selected,
-        };
-        if state.selected != before {
+        let before = (state.selected, state.page);
+        // Page Up and Page Down turn the page and select its first row.
+        let last_page = pages(rows, page_size(ui.ctx())) - 1;
+        if page_down && state.page < last_page {
+            state.page += 1;
+        } else if page_up && state.page > 0 {
+            state.page -= 1;
+        }
+        if state.page != before.1 {
+            page = state.page_rows(ui.ctx(), rows);
+            state.selected = Some(page.start);
+        } else {
+            // Within the page: a selection on another page starts from this one's edge.
+            let (first, last) = (page.start, page.end - 1);
+            let current = state.selected.filter(|s| page.contains(s));
+            state.selected = match (up, down, home, end) {
+                (true, ..) => Some(current.map_or(first, |s| s.saturating_sub(1).max(first))),
+                (_, true, ..) => Some(current.map_or(first, |s| (s + 1).min(last))),
+                (_, _, true, _) => Some(first),
+                (.., true) => Some(last),
+                _ => state.selected,
+            };
+        }
+        if (state.selected, state.page) != before {
             out.selection_changed = true;
             state.scroll_to_selected = true;
         }
@@ -1182,6 +1261,17 @@ pub fn table(
             out.activated = state.selected;
         }
     }
+    // A page the caller hasn't loaded yet isn't drawn: the frame is done again, unseen, once
+    // it has (an old page's rows never show at the new page's places).
+    let unloaded = state
+        .loaded
+        .as_ref()
+        .is_some_and(|l| !page.is_empty() && !(l.start <= page.start && page.end <= l.end));
+    if unloaded {
+        ui.ctx().request_discard("a table's page isn't loaded yet");
+    }
+    let first_row = page.start;
+    let page_len = if unloaded { 0 } else { page.len() };
 
     // The table's one keyboard stop, over where its rows were last frame. It's made before
     // the rows, so they're above it for the pointer and a click reaches its row.
@@ -1272,7 +1362,9 @@ pub fn table(
     if state.scroll_to_selected
         && let Some(s) = state.selected
     {
-        builder = builder.scroll_to_row(s, None);
+        if (first_row..first_row + page_len).contains(&s) {
+            builder = builder.scroll_to_row(s - first_row, None);
+        }
         state.scroll_to_selected = false;
     }
     // The flexible column (the one with no width, else the last) takes what's left, so the
@@ -1369,13 +1461,18 @@ pub fn table(
                             ascending: sorted.is_none_or(|s| !s.ascending),
                         });
                         out.sort_changed = true;
+                        // The first page of the new order, drawn once the caller has sorted
+                        // (or loaded) it: this frame is done again, unseen.
+                        state.page = 0;
+                        ui.ctx().request_discard("a table's sort changed");
                     }
                 });
             }
         })
         .body(|mut body| {
             let mut add_row = |mut row: egui_extras::TableRow<'_, '_>| {
-                let index = row.index();
+                // Its place in the whole list: the page's rows follow its first.
+                let index = first_row + row.index();
                 let mut first = None;
                 let selected = state.selected == Some(index);
                 row.set_selected(selected);
@@ -1458,11 +1555,11 @@ pub fn table(
                 }
             };
             if max_height.is_some() {
-                // Only the rows in view are laid out, for a long list in its own scroll area.
-                body.rows(row_height, rows, add_row);
+                // Only the rows in view are laid out, for a page in its own scroll area.
+                body.rows(row_height, page_len, add_row);
             } else {
-                // Every row, in a page that scrolls: a screen reader reaches each one.
-                for _ in 0..rows {
+                // Every row of the page, in a page that scrolls: a screen reader reaches each.
+                for _ in 0..page_len {
                     body.row(row_height, &mut add_row);
                 }
             }
@@ -1503,6 +1600,111 @@ pub fn table(
         empty(ui);
     }
     out
+}
+
+/// A [`pager`]'s height on one line, for a caller that gives its table the rest.
+pub const PAGER_HEIGHT: f32 = CONTROL_HEIGHT + 2.0 * space::XS;
+
+/// The pager under a [`table`] of `rows` rows (drawn by the table's caller, outside any
+/// sideways scrolling, so it stays in reach): which rows show ("51–100 of 312", or "0 of 0"),
+/// first, previous, next and last page, and how many rows a page has (25, 50 or 100, for every
+/// table: the window saves the choice, [`take_chosen_page_size`]). It's shown whatever the
+/// rows, one page or none. Narrower than it needs, its controls go on a line of their own.
+pub fn pager(ui: &mut Ui, state: &mut TableState, rows: usize) {
+    let p = theme::of(ui);
+    let page = state.page_rows(ui.ctx(), rows);
+    let size = page_size(ui.ctx());
+    let last_page = pages(rows, size) - 1;
+    let shown = if rows == 0 {
+        tr("pager-none")
+    } else {
+        replica_core::tr!(
+            "pager-range",
+            first = page.start + 1,
+            last = page.end,
+            total = rows
+        )
+    };
+    let size_name = tr("pager-size");
+    let size_text = size.to_string();
+    let spacing = ui.spacing().item_spacing.x;
+    let controls_width = 4.0 * ICON_BUTTON
+        + 3.0 * spacing
+        + space::M
+        + text_width(ui, &size_name)
+        + spacing
+        + dropdown_width(ui, None, &size_text, 80.0);
+    let shown_width = text_width(ui, &shown);
+    let mut chosen_page = None;
+    let mut chosen_size = None;
+    let mut controls = |ui: &mut Ui| {
+        for (icon, key, to, enabled) in [
+            (Icon::First, "pager-first", 0, state.page > 0),
+            (
+                Icon::Previous,
+                "pager-previous",
+                state.page.saturating_sub(1),
+                state.page > 0,
+            ),
+            (
+                Icon::Next,
+                "pager-next",
+                (state.page + 1).min(last_page),
+                state.page < last_page,
+            ),
+            (Icon::Last, "pager-last", last_page, state.page < last_page),
+        ] {
+            if ui
+                .add_enabled_ui(enabled, |ui| icon_button(ui, icon, &tr(key)))
+                .inner
+                .clicked()
+            {
+                chosen_page = Some(to);
+            }
+        }
+        ui.add_space(space::M);
+        let label = ui.label(RichText::new(&size_name).color(p.text_secondary));
+        dropdown(ui, "page-size", None, &size_text, 80.0, |ui| {
+            for n in replica_core::settings::PAGE_SIZES {
+                if dropdown_choice(ui, n as usize == size, n.to_string()).clicked() {
+                    chosen_size = Some(n as usize);
+                }
+            }
+        })
+        .labelled_by(label.id);
+    };
+    ui.add_space(space::XS);
+    if ui.available_width() >= shown_width + space::L + controls_width {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(&shown).color(p.text_secondary));
+            ui.add_space((ui.available_width() - controls_width).max(space::L));
+            controls(ui);
+        });
+    } else {
+        ui.label(RichText::new(&shown).color(p.text_secondary));
+        ui.horizontal_wrapped(|ui| controls(ui));
+    }
+    ui.add_space(space::XS);
+    if let Some(to) = chosen_page {
+        state.page = to;
+    }
+    if let Some(n) = chosen_size {
+        set_page_size(ui.ctx(), n);
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(page_size_chosen_id(), n));
+    }
+}
+
+/// How wide `text` is in the body font.
+fn text_width(ui: &Ui, text: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            egui::TextStyle::Body.resolve(ui.style()),
+            Color32::PLACEHOLDER,
+        )
+        .size()
+        .x
 }
 
 // --- Added for the Jobs page and the job editor --------------------------------------------

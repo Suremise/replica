@@ -64,6 +64,87 @@ impl Faked {
     }
 
     /// A history of mixed results: OK, partly done, failed, skipped and a test restore.
+    /// A long history to page through: `runs` runs and `tests` test restores of three jobs,
+    /// with every result, an hour apart (a test restore every so often between the runs).
+    pub fn with_many_runs(self, runs: usize, tests: usize) -> Faked {
+        let now = Utc::now();
+        let jobs = ["Documents", "Photos", "Music"];
+        let outcomes = [Outcome::Ok, Outcome::Ok, Outcome::Partly, Outcome::Failed];
+        let long_runs = (0..runs)
+            .map(|i| {
+                let outcome = outcomes[i % 4];
+                let bytes = 1_000_000 + (i as u64 * 7_919 % 10_007) * 100_000;
+                RunRecord {
+                    id: i as i64 + 1,
+                    job: jobs[i % 3].into(),
+                    started_at: now - chrono::TimeDelta::hours(i as i64 + 1),
+                    duration: Duration::from_secs(30 + (i as u64 * 37 % 101)),
+                    outcome,
+                    exit_code: outcome.exit_code(),
+                    files: 100 + (i as u64 * 13 % 97),
+                    bytes,
+                    error: (outcome == Outcome::Failed).then(|| "the share isn't reachable".into()),
+                    log_path: Some(PathBuf::from(format!(r"C:\Replica\logs\runs\{i}.log"))),
+                    targets: vec![TargetRecord {
+                        target: "NAS:Replica".into(),
+                        mode: "versioned".into(),
+                        outcome,
+                        files: 100,
+                        bytes,
+                        reason: None,
+                        snapshot_id: None,
+                        skipped: Some(if outcome == Outcome::Partly { 2 } else { 0 }),
+                        clashes: Vec::new(),
+                    }],
+                }
+            })
+            .collect();
+        let long_tests = (0..tests)
+            .map(|i| TestRestoreRecord {
+                id: i as i64 + 1,
+                job: jobs[(i + 1) % 3].into(),
+                target: "NAS:Replica".into(),
+                snapshot_id: Some(format!("{i:08x}")),
+                started_at: now - chrono::TimeDelta::minutes(i as i64 * 300 + 30),
+                duration: Duration::from_secs(20),
+                outcome: if i % 7 == 3 {
+                    Outcome::Failed
+                } else {
+                    Outcome::Ok
+                },
+                checked: 12,
+                differing: 0,
+                detail: None,
+            })
+            .collect();
+        *self.runs.lock().unwrap() = long_runs;
+        *self.tests.lock().unwrap() = long_tests;
+        self
+    }
+
+    /// [`Faked::with_snapshots`], with `n` snapshots a day apart instead of three.
+    pub fn with_many_snapshots(self, n: usize) -> Faked {
+        let faked = self.with_snapshots();
+        let template = faked.snapshots.lock().unwrap()[0].clone();
+        let now = Utc::now();
+        *faked.snapshots.lock().unwrap() = (0..n)
+            .map(|i| {
+                let short = if i == 0 {
+                    template.short_id.clone()
+                } else {
+                    format!("{:08x}", 0x5a00_0000 + i)
+                };
+                Snapshot {
+                    id: format!("{short}0123456789abcdef"),
+                    short_id: short,
+                    time: (now - chrono::TimeDelta::hours(2 + 24 * i as i64)).fixed_offset(),
+                    ..template.clone()
+                }
+            })
+            .collect();
+        faked
+    }
+
     pub fn with_history(self) -> Faked {
         let now = Utc::now();
         let run = |id: i64, job: &str, hours: i64, outcome: Outcome, label: &str| RunRecord {

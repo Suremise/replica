@@ -1,19 +1,18 @@
 //! The History tab: every run, newest first, with each target's result (and why it was
 //! skipped or failed), its start, duration, files, size and error, and its log; and the test
-//! restores, kept apart in the history but shown here with the runs. Filter by job and result
-//! (in the history itself, so an old run is found), and "Show older" pages back through the
-//! rest.
+//! restores, kept apart in the history but shown here with the runs.
 //!
-//! It's a sortable table under a toolbar (job, result, a period and a search, the
-//! last two over what's loaded), with a summary line above it and the chosen entry's details
-//! below.
+//! It's a sortable table under a toolbar (job, result, a period and a search), with a summary
+//! line above it, a pager under it and the chosen entry's details below. The filters, the
+//! search and the order apply to the whole history, and only the page shown is read from it
+//! ([`replica_core::history::History::page`]).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local, Utc};
 use eframe::egui::{self, RichText, Ui};
-use replica_core::history::{HistoryFilter, RunRecord, TestRestoreRecord};
+use replica_core::history::{Counts, HistoryQuery, Record, RunRecord, SortBy, TestRestoreRecord};
 use replica_core::i18n::tr;
 use replica_core::run::Outcome;
 use replica_core::tr;
@@ -24,9 +23,9 @@ use super::jobs::outcome_text;
 use super::theme::{self, space};
 use super::widgets::{
     InfoKind, Sort, TableColumn, TableState, Tone, cell_status_chip, dropdown, dropdown_value,
-    empty_state, error_text, icon_button, info_bar, info_row, leaving_room, quiet_mono, quiet_path,
-    quiet_text, secondary_button, section_card_with_actions, size_text, status_chip,
-    status_chip_width, table, table_frame, toolbar_group_gap,
+    empty_state, error_text, icon_button, info_bar, info_row, leaving_room, page_size, pager,
+    quiet_mono, quiet_path, quiet_text, secondary_button, section_card_with_actions, size_text,
+    status_chip, status_chip_width, table, table_frame, toolbar_group_gap,
 };
 use crate::cli::duration_text;
 
@@ -201,60 +200,47 @@ impl Entry {
     }
 }
 
-/// Runs and test restores together, newest first.
-pub fn merge(runs: Vec<RunRecord>, tests: Vec<TestRestoreRecord>) -> Vec<Entry> {
-    let mut all: Vec<Entry> = runs
-        .into_iter()
-        .map(Entry::Run)
-        .chain(tests.into_iter().map(Entry::Test))
-        .collect();
-    all.sort_by_key(|e| std::cmp::Reverse(e.started_at()));
-    all
-}
-
-/// The table's order: by `sort`'s column (the table's), newest first without one.
-fn sort(entries: &mut [Entry], sort: Option<Sort>) {
-    let Some(sort) = sort else {
-        return;
-    };
-    entries.sort_by(|a, b| {
-        let order = match sort.column {
-            0 => a.started_at().cmp(&b.started_at()),
-            1 => a.job().to_lowercase().cmp(&b.job().to_lowercase()),
-            3 => worse(a.outcome()).cmp(&worse(b.outcome())),
-            4 => a.duration().cmp(&b.duration()),
-            5 => a.files().cmp(&b.files()),
-            _ => a.bytes().cmp(&b.bytes()),
-        };
-        if sort.ascending {
-            order
-        } else {
-            order.reverse()
+impl From<Record> for Entry {
+    fn from(record: Record) -> Self {
+        match record {
+            Record::Run(r) => Entry::Run(r),
+            Record::Test(t) => Entry::Test(t),
         }
-    });
-}
-
-/// How bad a result is, to sort by: ok, skipped, partly, failed (as core ranks them).
-fn worse(outcome: Outcome) -> u8 {
-    match outcome {
-        Outcome::Ok => 0,
-        Outcome::Skipped => 1,
-        Outcome::Partly => 2,
-        Outcome::Failed => 3,
     }
 }
 
-/// "12 runs · 2 test restores · 10 OK · 1 failed · 1 skipped": what's listed, counted.
-pub fn summary_line(entries: &[Entry]) -> String {
-    let runs = entries
-        .iter()
-        .filter(|e| matches!(e, Entry::Run(_)))
-        .count();
-    let tests = entries.len() - runs;
-    let count = |o: Outcome| entries.iter().filter(|e| e.outcome() == o).count();
-    let mut parts = vec![tr!("history-summary-runs", count = runs)];
-    if tests > 0 {
-        parts.push(tr!("history-summary-tests", count = tests));
+/// The history's order for the table's `sort` (its columns, by place): newest first without
+/// one. The Target column isn't sortable.
+fn sort_by(sort: Option<Sort>) -> Option<(SortBy, bool)> {
+    let sort = sort?;
+    let column = match sort.column {
+        0 => SortBy::Started,
+        1 => SortBy::Job,
+        3 => SortBy::Result,
+        4 => SortBy::Duration,
+        5 => SortBy::Files,
+        6 => SortBy::Size,
+        _ => return None,
+    };
+    Some((column, sort.ascending))
+}
+
+/// Whether the search `needle` (trimmed, in lower case) is in `record`'s
+/// [`Entry::search_text`]: the words the window shows it in, any case, `%` and `_` as
+/// themselves.
+pub fn matches_search(record: &Record, needle: &str) -> bool {
+    Entry::from(record.clone())
+        .search_text()
+        .to_lowercase()
+        .contains(needle)
+}
+
+/// "12 runs · 2 test restores · 10 OK · 1 failed · 1 skipped": what's listed (every page),
+/// counted.
+pub fn summary_line(counts: &Counts) -> String {
+    let mut parts = vec![tr!("history-summary-runs", count = counts.runs)];
+    if counts.tests > 0 {
+        parts.push(tr!("history-summary-tests", count = counts.tests));
     }
     for (outcome, key) in [
         (Outcome::Ok, "history-summary-ok"),
@@ -262,7 +248,7 @@ pub fn summary_line(entries: &[Entry]) -> String {
         (Outcome::Failed, "history-summary-failed"),
         (Outcome::Skipped, "history-summary-skipped"),
     ] {
-        let n = count(outcome);
+        let n = counts.of(outcome);
         if n > 0 || outcome == Outcome::Ok {
             parts.push(tr!(key, count = n));
         }
@@ -324,31 +310,62 @@ fn local_minute(at: &DateTime<Utc>) -> String {
         .to_string()
 }
 
+/// What the list shows: its filters, search, order and page. When it differs from what's
+/// loaded, the history is read again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Want {
+    job: Option<String>,
+    result: Option<Outcome>,
+    period: Period,
+    /// The search, trimmed and in lower case.
+    search: String,
+    sort: Option<Sort>,
+    /// The page's first entry in the whole list, and how many a page has.
+    offset: usize,
+    size: usize,
+}
+
+impl Want {
+    /// Whether `other` lists the same entries (whatever the order or page).
+    fn same_list(&self, other: &Want) -> bool {
+        (&self.job, self.result, self.period, &self.search)
+            == (&other.job, other.result, other.period, &other.search)
+    }
+}
+
+/// A page of the history as read, and what for.
+struct Loaded {
+    want: Want,
+    counts: Counts,
+    entries: Vec<Entry>,
+}
+
 pub struct HistoryTab {
     backend: Arc<dyn Backend>,
-    entries: Result<Vec<Entry>, String>,
+    loaded: Option<Loaded>,
+    /// Why the history couldn't be read, if it couldn't.
+    error: Option<String>,
     /// Every job in the history, for the job filter.
     jobs: Vec<String>,
-    /// How many pages of each kind are loaded ("Show older" adds one).
-    pages: usize,
-    /// More, older entries match the filters.
-    more: bool,
     loaded_at: Option<Instant>,
-    /// The filter the entries were loaded for.
-    loaded_for: HistoryFilter,
     /// Only this job, if chosen.
     pub job: Option<String>,
     /// Only this result, if chosen.
     pub result: Option<Outcome>,
-    /// Only entries this recent (of those loaded).
+    /// Only entries this recent.
     pub period: Period,
-    /// Only entries whose job, targets, result or errors have this (of those loaded).
+    /// Only entries whose job, targets, result or errors have this.
     pub search: String,
     /// The Started column's width as the table first shows it.
     pub started_width: f32,
     table: TableState,
     /// The chosen entry, by [`Entry::key`].
     selected: Option<(bool, i64)>,
+    /// The chosen entry as last read: its details stay below while the list pages away.
+    chosen: Option<Entry>,
+    /// A row chosen, by its place in the whole list, on a page not read yet (Page Down): it's
+    /// chosen once its page is.
+    pending: Option<usize>,
     message: Option<String>,
 }
 
@@ -356,12 +373,10 @@ impl HistoryTab {
     pub fn new(backend: Arc<dyn Backend>) -> Self {
         Self {
             backend,
-            entries: Ok(Vec::new()),
+            loaded: None,
+            error: None,
             jobs: Vec::new(),
-            pages: 1,
-            more: false,
             loaded_at: None,
-            loaded_for: HistoryFilter::default(),
             job: None,
             result: None,
             period: Period::Any,
@@ -369,79 +384,138 @@ impl HistoryTab {
             started_width: 124.0,
             table: TableState::default(),
             selected: None,
+            chosen: None,
+            pending: None,
             message: None,
         }
     }
 
-    fn filter(&self) -> HistoryFilter {
-        HistoryFilter {
+    fn want(&self, size: usize) -> Want {
+        Want {
             job: self.job.clone(),
-            outcome: self.result,
+            result: self.result,
+            period: self.period,
+            search: self.search.trim().to_lowercase(),
+            sort: self.table.sort,
+            offset: self.table.page * size,
+            size,
         }
     }
 
-    /// Reads the history again: the filters are applied there, so every entry, however old,
-    /// is reached by filtering or by "Show older".
+    /// Reads the history again on the next frame (a run finished, the filters were set).
     pub fn load(&mut self) {
+        self.loaded_at = None;
+    }
+
+    /// Reads the page the list wants, `size` a page. The filters, the period and the search
+    /// apply to the whole history (the search entry by entry, in the words the window shows
+    /// them in: [`Entry::search_text`]), then the order, then the page: only the page is
+    /// read. A new filter or search starts at the first page, and lets go of a chosen entry
+    /// it leaves out; a page past the end (the list shrank) goes to the last.
+    fn read(&mut self, size: usize) {
         self.loaded_at = Some(Instant::now());
-        let filter = self.filter();
-        if filter != self.loaded_for {
-            self.pages = 1;
+        let new_list = self
+            .loaded
+            .as_ref()
+            .is_some_and(|l| !l.want.same_list(&self.want(size)));
+        if new_list {
+            self.table.page = 0;
+            self.pending = None;
         }
-        self.loaded_for = filter.clone();
-        let limit = self.pages * PAGE;
-        let loaded = self
-            .backend
-            .runs(&filter, limit)
-            .and_then(|runs| Ok((runs, self.backend.test_restores(&filter, limit)?)));
-        match loaded {
-            Ok((runs, tests)) => {
-                let page = paged(runs, tests, limit);
-                self.more = page.more;
-                self.entries = Ok(page.entries);
+        for _ in 0..2 {
+            let want = self.want(size);
+            let query = HistoryQuery {
+                job: want.job.clone(),
+                outcome: want.result,
+                since: want.period.since(Utc::now()),
+                sort: sort_by(want.sort),
+            };
+            let needle = want.search.clone();
+            let mut search = |r: &Record| matches_search(r, &needle);
+            let matches: Option<&mut dyn FnMut(&Record) -> bool> = if needle.is_empty() {
+                None
+            } else {
+                Some(&mut search)
+            };
+            match self
+                .backend
+                .history_page(&query, want.offset, size, matches)
+            {
+                Ok(page) => {
+                    let total = page.counts.total();
+                    // Past the end: the last page, read again once.
+                    if page.records.is_empty() && want.offset > 0 && total > 0 {
+                        self.table.page = (total - 1) / size;
+                        continue;
+                    }
+                    self.loaded = Some(Loaded {
+                        want,
+                        counts: page.counts,
+                        entries: page.records.into_iter().map(Entry::from).collect(),
+                    });
+                    self.error = None;
+                }
+                Err(e) => {
+                    self.loaded = None;
+                    self.error = Some(e);
+                }
             }
-            Err(e) => self.entries = Err(e),
+            break;
+        }
+        // A new list keeps the chosen entry only if it's on the page it starts at.
+        if new_list
+            && let Some(key) = self.selected
+            && !self.shown().iter().any(|e| e.key() == key)
+        {
+            self.selected = None;
+            self.chosen = None;
         }
         self.jobs = self.backend.history_jobs().unwrap_or_default();
     }
 
-    /// The entries loaded, newest first.
+    /// The entries on the page read, in the list's order.
     pub fn shown(&self) -> Vec<&Entry> {
-        self.entries
+        self.loaded
             .as_ref()
-            .map(|all| all.iter().collect())
+            .map(|l| l.entries.iter().collect())
             .unwrap_or_default()
     }
 
-    /// Whether older entries match the filters and aren't loaded yet.
-    pub fn has_older(&self) -> bool {
-        self.more
-    }
-
-    /// Loads the next, older page.
-    pub fn show_older(&mut self) {
-        self.pages += 1;
-        self.load();
-    }
-
     pub fn ui(&mut self, ui: &mut Ui) {
-        if self.loaded_at.is_none_or(|t| t.elapsed() >= RELOAD) || self.filter() != self.loaded_for
-        {
-            self.load();
-        }
-        ui.ctx().request_repaint_after(RELOAD);
         self.filters(ui);
         ui.add_space(space::M);
+        // The page as the table will show it: a new page size keeps its first row in view.
+        let size = page_size(ui.ctx());
+        if let Some(loaded) = &self.loaded
+            && loaded.want.same_list(&self.want(size))
+        {
+            let total = loaded.counts.total();
+            self.table.page_rows(ui.ctx(), total);
+        }
+        let stale = self.loaded_at.is_none_or(|t| t.elapsed() >= RELOAD);
+        if stale
+            || self
+                .loaded
+                .as_ref()
+                .is_none_or(|l| l.want != self.want(size))
+        {
+            self.read(size);
+        }
+        ui.ctx().request_repaint_after(RELOAD);
         if let Some(message) = &self.message {
             info_bar(ui, InfoKind::Error, None, message);
             ui.add_space(space::S);
         }
-        if let Err(e) = &self.entries {
+        if let Some(e) = &self.error {
             info_bar(ui, InfoKind::Error, None, e);
             return;
         }
-        let mut shown = self.visible();
-        if shown.is_empty() {
+        let Some(loaded) = &self.loaded else {
+            return;
+        };
+        let (counts, offset) = (loaded.counts, loaded.want.offset);
+        let entries = loaded.entries.clone();
+        if counts.total() == 0 {
             if self.filtered() {
                 let clear = empty_state(
                     ui,
@@ -462,23 +536,33 @@ impl HistoryTab {
                     None,
                 );
             }
-            if self.more && secondary_button(ui, &tr("history-show-older")).clicked() {
-                self.show_older();
-            }
+            // Under every table, its pager: "0 of 0" here.
+            pager(ui, &mut self.table, 0);
             return;
         }
-        sort(&mut shown, self.table.sort);
-        // The selection follows its entry, not its place, as the list re-reads and re-sorts.
+        // The row chosen on a page that wasn't read yet, now it is.
+        if let Some(i) = self.pending
+            && let Some(e) = i.checked_sub(offset).and_then(|i| entries.get(i))
+        {
+            self.selected = Some(e.key());
+            self.pending = None;
+        }
+        // The selection follows its entry, not its place, as the list re-reads; chosen on
+        // another page, no row here is selected, and its details stay below.
         self.table.selected = self
             .selected
-            .and_then(|key| shown.iter().position(|e| e.key() == key));
-        if self.table.selected.is_none() {
-            self.selected = None;
+            .and_then(|key| entries.iter().position(|e| e.key() == key))
+            .map(|i| offset + i);
+        if let Some(key) = self.selected
+            && let Some(e) = entries.iter().find(|e| e.key() == key)
+        {
+            self.chosen = Some(e.clone());
         }
+        self.table.loaded = Some(offset..offset + entries.len());
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.label(RichText::new(summary_line(&shown)).color(theme::of(ui).text_secondary));
+                ui.label(RichText::new(summary_line(&counts)).color(theme::of(ui).text_secondary));
                 ui.add_space(space::S);
                 table_frame(theme::of(ui)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -491,17 +575,13 @@ impl HistoryTab {
                         .show(ui, |ui| {
                             // At least the columns' least: narrower than that, it scrolls.
                             ui.set_width(width.max(self.started_width + TABLE_LEAST));
-                            self.table(ui, &shown);
+                            self.table(ui, &entries, offset, counts.total());
                         });
                 });
-                if self.more {
-                    ui.add_space(space::S);
-                    if secondary_button(ui, &tr("history-show-older")).clicked() {
-                        self.show_older();
-                    }
-                }
+                // Outside the sideways scrolling, so its controls stay in reach.
+                pager(ui, &mut self.table, counts.total());
                 ui.add_space(space::M);
-                if let Some(entry) = self.table.selected.and_then(|i| shown.get(i)).cloned() {
+                if let Some(entry) = self.chosen.clone() {
                     self.details(ui, &entry);
                 }
             });
@@ -522,20 +602,8 @@ impl HistoryTab {
         self.search.clear();
     }
 
-    /// The entries loaded that pass the period and the search (both on what's loaded: "Show
-    /// older" reaches further back).
-    fn visible(&self) -> Vec<Entry> {
-        let since = self.period.since(Utc::now());
-        let search = self.search.trim().to_lowercase();
-        self.shown()
-            .into_iter()
-            .filter(|e| since.is_none_or(|s| e.started_at() >= s))
-            .filter(|e| search.is_empty() || e.search_text().to_lowercase().contains(&search))
-            .cloned()
-            .collect()
-    }
-
-    fn table(&mut self, ui: &mut Ui, shown: &[Entry]) {
+    /// The table of the page read: `entries`, the whole list's from `offset`, of `total`.
+    fn table(&mut self, ui: &mut Ui, entries: &[Entry], offset: usize, total: usize) {
         let columns = [
             TableColumn::new(tr("history-col-started"), Some(self.started_width)).sortable(),
             // The job takes what the others leave.
@@ -556,20 +624,23 @@ impl HistoryTab {
                 .sortable()
                 .right_aligned(),
         ];
+        // The table draws only the page read (`TableState::loaded`): a row's place in the whole
+        // list, less `offset`, is its place here.
+        let at = |row: usize| &entries[row - offset];
         let response = table(
             ui,
             &tr("tab-history"),
             &columns,
-            shown.len(),
+            total,
             // As tall as its rows, in the page's scroll area: every row is laid out, so a
             // screen reader reaches each one.
             None,
             &mut self.table,
-            |i| shown[i].summary(),
+            |i| at(i).summary(),
             // Never shown: an empty list has its own empty state.
             |_| {},
             |ui, row, col| {
-                let entry = &shown[row];
+                let entry = at(row);
                 match col {
                     0 => {
                         // To the minute: the seconds are in its details.
@@ -609,13 +680,25 @@ impl HistoryTab {
         if response.sort_changed {
             self.table.selected = None;
             self.selected = None;
+            self.chosen = None;
+            self.pending = None;
         }
         if response.selection_changed {
-            self.selected = self
-                .table
-                .selected
-                .and_then(|i| shown.get(i))
-                .map(Entry::key);
+            let page = offset..offset + entries.len();
+            match self.table.selected {
+                Some(i) if page.contains(&i) => {
+                    let entry = &entries[i - offset];
+                    self.selected = Some(entry.key());
+                    self.chosen = Some(entry.clone());
+                    self.pending = None;
+                }
+                // On a page not read yet: chosen once it is.
+                Some(i) => self.pending = Some(i),
+                None => {
+                    self.selected = None;
+                    self.chosen = None;
+                }
+            }
         }
     }
 
@@ -623,7 +706,6 @@ impl HistoryTab {
     /// then the search in the rest of the width, and "Look again" at the right end. Too narrow
     /// for the search, the search goes on a second row, never the button.
     fn filters(&mut self, ui: &mut Ui) {
-        let before = self.filter();
         let mut refresh = false;
         let mut search_below = false;
         let row = egui::vec2(ui.available_width(), theme::CONTROL_HEIGHT);
@@ -645,7 +727,8 @@ impl HistoryTab {
             ui.add_space(space::TOOLBAR_GAP);
             self.search_field(ui);
         }
-        if refresh || self.filter() != before {
+        // A changed filter or search is read by `ui`, which sees the list it wants change.
+        if refresh {
             self.load();
         }
     }
@@ -753,43 +836,6 @@ impl HistoryTab {
                 .err()
                 .map(|e| tr!("history-open-log-failed", error = e));
         }
-    }
-}
-
-/// How many runs (and test restores) a page holds.
-pub const PAGE: usize = 200;
-
-/// A page of the history: runs and test restores (each asked for with `limit`) merged, newest
-/// first, cut where one kind may have older entries not loaded yet, so nothing is missing
-/// from what's shown.
-pub struct Page {
-    pub entries: Vec<Entry>,
-    pub more: bool,
-}
-
-pub fn paged(runs: Vec<RunRecord>, tests: Vec<TestRestoreRecord>, limit: usize) -> Page {
-    let more_runs = runs.len() >= limit;
-    let more_tests = tests.len() >= limit;
-    // The oldest entry of each kind that may go on: below the later of those, something of
-    // that kind may be missing.
-    let cutoff = [
-        more_runs
-            .then(|| runs.last().map(|r| r.started_at))
-            .flatten(),
-        more_tests
-            .then(|| tests.last().map(|t| t.started_at))
-            .flatten(),
-    ]
-    .into_iter()
-    .flatten()
-    .max();
-    let mut entries = merge(runs, tests);
-    if let Some(cutoff) = cutoff {
-        entries.retain(|e| e.started_at() >= cutoff);
-    }
-    Page {
-        entries,
-        more: more_runs || more_tests,
     }
 }
 
@@ -937,23 +983,67 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_page_stops_where_a_kind_may_have_more() {
-        // Runs at 9..=6 (a full page of 4, so maybe more) and a test restore at 3.
-        let runs: Vec<RunRecord> = (6..=9).rev().map(|h| run("a", h, Outcome::Ok)).collect();
-        let page = paged(runs, vec![test("a", 3)], 4);
-        assert!(page.more);
-        // The test restore at 3 waits: runs between 6 and 3 may not be loaded yet.
-        let hours: Vec<u32> = page
-            .entries
-            .iter()
-            .map(|e| chrono::Timelike::hour(&e.started_at()))
-            .collect();
-        assert_eq!(hours, [9, 8, 7, 6]);
+    /// `run` with one target, `skipped` files it couldn't back up, and `reason`.
+    fn run_to(
+        job: &str,
+        hour: u32,
+        outcome: Outcome,
+        target: &str,
+        skipped: Option<u64>,
+        reason: &str,
+    ) -> Record {
+        Record::Run(RunRecord {
+            targets: vec![replica_core::history::TargetRecord {
+                target: target.into(),
+                mode: "versioned".into(),
+                outcome,
+                files: 3,
+                bytes: 1000,
+                reason: Some(reason.into()),
+                snapshot_id: None,
+                skipped,
+                clashes: vec!["a clash to resolve".into()],
+            }],
+            ..run(job, hour, outcome)
+        })
+    }
 
-        let all = paged(vec![run("a", 9, Outcome::Ok)], vec![test("a", 3)], 4);
-        assert!(!all.more);
-        assert_eq!(all.entries.len(), 2);
+    /// The search as the window does it: trimmed and in lower case.
+    fn found(record: &Record, search: &str) -> bool {
+        matches_search(record, &search.trim().to_lowercase())
+    }
+
+    #[test]
+    fn the_search_reads_entries_as_the_window_words_them() {
+        let partly = run_to("docs", 9, Outcome::Partly, "Диск", Some(3), "Ошибка чтения");
+        let other = run_to("docs", 8, Outcome::Partly, "nas", Some(2), "plain");
+        let odd = run_to("a_b%c", 7, Outcome::Ok, "nas", None, "fine");
+        let abc = run_to("abc", 6, Outcome::Ok, "nas", None, "fine");
+        let failed = Record::Run(run("music", 5, Outcome::Failed));
+        let failed_test = Record::Test(TestRestoreRecord {
+            outcome: Outcome::Failed,
+            detail: Some("Report.docx differs".into()),
+            ..test("music", 4)
+        });
+
+        // Its result as shown, with how many files were skipped.
+        assert!(found(&partly, "3 skipped"));
+        assert!(!found(&other, "3 skipped"));
+        // Any case, beyond ASCII too, in a target's name and its reason.
+        assert!(found(&partly, "диск"));
+        assert!(found(&partly, "  ОШИБКА  "));
+        // `%` and `_` are themselves, not patterns.
+        assert!(found(&odd, "_b%"));
+        assert!(!found(&abc, "a%"));
+        assert!(!found(&abc, "a_c"));
+        // A result in its words, for runs and test restores alike.
+        let word = outcome_text(Outcome::Failed);
+        assert!(found(&failed, &word));
+        assert!(found(&failed_test, &word));
+        assert!(!found(&abc, &word));
+        // A clash, and a test restore's detail.
+        assert!(found(&partly, "clash to resolve"));
+        assert!(found(&failed_test, "report.docx"));
     }
 
     #[test]
@@ -961,19 +1051,5 @@ mod tests {
         assert_eq!(mode_label("versioned"), tr("mode-versioned"));
         assert_eq!(mode_label("mirror"), tr("mode-mirror"));
         assert_eq!(mode_label("other"), "other");
-    }
-
-    #[test]
-    fn runs_and_test_restores_are_newest_first() {
-        let all = merge(
-            vec![run("a", 9, Outcome::Ok), run("a", 7, Outcome::Failed)],
-            vec![test("a", 8)],
-        );
-        let hours: Vec<u32> = all
-            .iter()
-            .map(|e| chrono::Timelike::hour(&e.started_at()))
-            .collect();
-        assert_eq!(hours, [9, 8, 7]);
-        assert!(matches!(all[1], Entry::Test(_)));
     }
 }

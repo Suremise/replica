@@ -41,6 +41,15 @@ page-about-subtitle = The version, updates, the licence and the third-party noti
 widget-copy-path = Copy the full path
 # A table's sortable column header, for a screen reader.
 widget-sort-by = Sort by { $column }
+# The pager under every table. $first and $last: the rows shown, from 1; $total: all of them.
+pager-range = { $first }–{ $last } of { $total }
+# A table with no rows.
+pager-none = 0 of 0
+pager-first = First page
+pager-previous = Previous page
+pager-next = Next page
+pager-last = Last page
+pager-size = Rows per page
 widget-time-now = just now
 widget-time-in-minutes = in { $n } min
 widget-time-ago-minutes = { $n } min ago
@@ -494,7 +503,6 @@ history-no-match-title = No runs match these filters
 history-no-match-body = Try another job, result or time, or clear the filters to see every run.
 history-clear-filters = Clear filters
 history-refresh = Look again
-history-show-older = Show older
 history-filter-job = Job
 history-all-jobs = All jobs
 history-filter-result = Result

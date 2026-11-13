@@ -1046,6 +1046,20 @@ Restore, Settings, About) is built from these.
   it lands there. With `max_height` only the rows in view are laid out; without it, every row
   is, for a page that scrolls and a screen reader that reaches each one. Sortable headers are
   named "Sort by <column>", apart from a filter named by the same word.
+- **Every table is paged:** a table shows a page of its rows (`TableState::page`), and its
+  caller draws `widgets::pager` under it, outside any sideways scrolling, whatever the rows (one
+  page, or none: "0 of 0"): "51–100 of 312", First, Previous, Next and Last page (icon buttons
+  named for a screen reader), and "Rows per page", 25, 50 or 100 for every table
+  (`app.table_page_size`, default 50). The shell sets the size in egui's memory each frame and
+  saves a size chosen in any pager; a new size keeps the page's first row in view, and a page
+  past a shrunken list's end goes to its last. The arrow keys, Home and End move within the
+  page; Page Up and Page Down turn it. A new sort goes back to page 1, and the frame is done
+  again, unseen, so the old order's rows never show; callers go back to page 1 on a new filter.
+  Rows are passed to `cell` and `row_name` by their place in the whole list. Jobs gives its
+  rows the window's height less the pager's, so the pager stays in view. A caller keeps its
+  chosen row by what it is (Jobs by name, History by its key, Restore by snapshot ID), not by
+  its place, and finds its row again each frame: a run that reorders the list doesn't move
+  the choice to another row, nor the page.
 - `quiet_text` is a table cell's text drawn without a node of its own (the row is named with
   all of them), cut with "…" and whole on hover; `tree_folder` is a folder in a tree (an arrow
   read as a tree item with its expanded state, also answering UI Automation's Expand and
@@ -1145,19 +1159,35 @@ A change that adds a screen adds it to `screens()` in that file.
 re-read every few seconds while shown. Each opens to its targets' results (mode in words, and
 why one was skipped or failed), its error and "Open the log" (the default viewer, through
 `replica_win::window::open`); a test restore to the files that differ, or to why it couldn't
-run. **Every entry is reachable:** the job and result filters are applied in the history
-(`History::runs` / `test_restores` with a `HistoryFilter`, before the limit), the job list is
-every job the history has seen (`job_names`), and "Show older" loads another page of 200 of
-each kind. A page is cut where one kind may have older entries not loaded yet, so the list
-never skips one (`history::paged`).
-- **Its layout:** a toolbar (job and result, applied in the history as above; a period
-  and a search, over what's loaded, so "Show older" reaches further), a summary line ("6 runs ·
-  1 test restore · 4 OK · …"), and a sortable `widgets::table` (started, job with a "Test
-  restore" chip for one, target, result chip, duration, files, size) that scrolls sideways in a
-  narrow window. Each row is named with its whole line (`Entry::summary`), its cells drawn
-  quietly. The chosen entry's card below has each target's result and why, the error, "Open
-  the log" and "Copy details" (`Entry::details_text`); the choice follows its entry
-  (`Entry::key`) as the list re-reads and re-sorts. An empty state when there's no history.
+run. **Every entry is reachable, a page at a time:** `History::page` lists runs and test
+restores together (`runs UNION ALL test_restores`), with the job, result and period filters in
+its WHERE and the table's sort in its ORDER BY (ties newest first, then runs first, then the
+later recorded first, so every entry has one place; a job's name ignoring case by
+`unicode_lower`, Rust's lower case registered on the connection, as SQLite's `lower` folds
+ASCII only), and reads only the page asked for: a
+COUNT grouped by kind and result, then LIMIT and OFFSET, then those records by ID. The job
+list is every job the history has seen (`job_names`).
+- **The search** keeps the window's own words: with one, `page` reads the filtered entries one
+  at a time in that order and a closure the window gives (`history::matches_search`, over
+  `Entry::search_text`: the job, targets, the result as shown with its skipped count, reasons,
+  clashes, errors; Unicode lower case, `%` and `_` as themselves) decides each. Only the
+  matches are counted and only those in the page kept, so memory is one entry and a page
+  however many match. **Its cost:** a search reads every filtered entry, on the UI thread, when
+  what's shown changes (filters, search, sort, page, size) and at the 3 s refresh, never on
+  an unchanged frame (about 0.2 s for 10,000 entries in a debug build, under load;
+  `history::tests::search_time`).
+- **Its layout:** a toolbar (job, result, period, search), a summary line counting the whole
+  list ("312 runs · 52 test restores · 200 OK · …", `Counts`), a sortable `widgets::table`
+  (started, job with a "Test restore" chip for one, target, result chip, duration, files, size)
+  that scrolls sideways in a narrow window, and its pager under it, outside that scrolling.
+  The tab keeps what it wants (filters, search, sort, page, size) and what it read for; when
+  they differ it reads again before drawing, and a page the table turns to itself (Page Down,
+  a new sort) is drawn only once read (`TableState::loaded`). A new filter or search goes back
+  to page 1. Each row is named with its whole line (`Entry::summary`), its cells drawn quietly.
+  The chosen entry's card below has each target's result and why, the error, "Open the log"
+  and "Copy details" (`Entry::details_text`); the choice follows its entry (`Entry::key`) as
+  the list re-reads, and its card stays while the list pages away from it. An empty state
+  when there's no history, with the pager saying "0 of 0".
 - A partly-done run's chip says how many files it skipped, "Partly done · 3 skipped"
   (`history::result_text`), in the table and for each target in the card: the history
   keeps each target's count (`TargetRecord::skipped`, the files it couldn't back up or copy;
@@ -1275,8 +1305,12 @@ example the same variable: it uses that prefix and leaves it for its owner to re
   `check_accessibility` (every control has a name). History's details, log and
   filters; browsing a snapshot folder by folder and restoring a file and a folder to a new
   folder; the confirmation before restoring over the originals; a test restore's result; History
-  past its first page (an old job's run found by its filter and by "Show older", and offered in
-  the job list). About's version, licence, notices (restic's section) and link. In Jobs:
+  past its first page (an old job's run found by its filter and on the last page, and offered
+  in the job list). In `ui_shots.rs`, the tables in pages: History's 312 runs and test restores
+  paged and counted, the page size saved and keeping its first row in view (and at the list's
+  end), a sort and a filter over every page back to page 1, the chosen entry kept as the list
+  re-reads, Page Up and Page Down, Restore's 120 snapshots, and every pager in reach at the
+  window's least width, with one page, many or none. About's version, licence, notices (restic's section) and link. In Jobs:
   Delete through the row's ⋯ menu; leaving the editor with changes asks first ("Keep
   editing" keeps them, "Discard changes" saves nothing); a saved share login shows its user
   name, never its password, and Change… and "Save login" store a new one at once.

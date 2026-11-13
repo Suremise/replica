@@ -154,6 +154,162 @@ impl HistoryFilter {
     }
 }
 
+/// The column the window's history is listed by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortBy {
+    Started,
+    /// The job's name, ignoring case.
+    Job,
+    /// The result, worse last going up: OK, skipped, partly done, failed.
+    Result,
+    Duration,
+    /// The files backed up, or a test restore's files compared.
+    Files,
+    /// The size backed up; a test restore has none, which comes first going up.
+    Size,
+}
+
+/// What the window's history lists ([`History::page`]): runs and test restores together,
+/// filtered as [`HistoryFilter`] does and by when they started, in an order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HistoryQuery {
+    /// A job's name (any case).
+    pub job: Option<String>,
+    pub outcome: Option<Outcome>,
+    /// Only those started then or later.
+    pub since: Option<DateTime<Utc>>,
+    /// The column and whether going up; `None`, newest first.
+    pub sort: Option<(SortBy, bool)>,
+}
+
+impl HistoryQuery {
+    /// Its ORDER BY over the listed columns. Ties go newest first, then runs before test
+    /// restores, then the later recorded first, so every entry has one place and pages
+    /// don't overlap.
+    fn order_by(&self) -> String {
+        let tie = "started_at DESC, kind ASC, id DESC";
+        let Some((column, up)) = self.sort else {
+            return tie.to_owned();
+        };
+        let key = match column {
+            SortBy::Started => "started_at",
+            SortBy::Job => "unicode_lower(job)",
+            SortBy::Result => {
+                "CASE outcome WHEN 'ok' THEN 0 WHEN 'skipped' THEN 1 WHEN 'partly' THEN 2 ELSE 3 END"
+            }
+            SortBy::Duration => "duration_ms",
+            SortBy::Files => "files",
+            SortBy::Size => "bytes",
+        };
+        format!("{key} {}, {tie}", if up { "ASC" } else { "DESC" })
+    }
+}
+
+/// A run or a test restore, as the window's history lists them.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Record {
+    Run(RunRecord),
+    Test(TestRestoreRecord),
+}
+
+impl Record {
+    pub fn outcome(&self) -> Outcome {
+        match self {
+            Record::Run(r) => r.outcome,
+            Record::Test(t) => t.outcome,
+        }
+    }
+}
+
+/// How many entries a [`HistoryQuery`] lists, by kind and by result.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counts {
+    pub runs: usize,
+    pub tests: usize,
+    pub ok: usize,
+    pub partly: usize,
+    pub failed: usize,
+    pub skipped: usize,
+}
+
+impl Counts {
+    pub fn total(&self) -> usize {
+        self.runs + self.tests
+    }
+
+    /// The entries with `outcome`.
+    pub fn of(&self, outcome: Outcome) -> usize {
+        match outcome {
+            Outcome::Ok => self.ok,
+            Outcome::Partly => self.partly,
+            Outcome::Failed => self.failed,
+            Outcome::Skipped => self.skipped,
+        }
+    }
+
+    fn add(&mut self, test: bool, outcome: Outcome, n: usize) {
+        if test {
+            self.tests += n;
+        } else {
+            self.runs += n;
+        }
+        match outcome {
+            Outcome::Ok => self.ok += n,
+            Outcome::Partly => self.partly += n,
+            Outcome::Failed => self.failed += n,
+            Outcome::Skipped => self.skipped += n,
+        }
+    }
+}
+
+/// A page of the history, and how many entries it's a page of ([`History::page`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HistoryPage {
+    pub counts: Counts,
+    pub records: Vec<Record>,
+}
+
+/// A run's columns, as [`run_from_row`] reads them.
+const RUN_COLUMNS: &str =
+    "id, job, started_at, duration_ms, outcome, exit_code, files, bytes, error, log_path";
+
+/// A run from a row of [`RUN_COLUMNS`], without its targets.
+fn run_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
+    Ok(RunRecord {
+        id: r.get(0)?,
+        job: r.get(1)?,
+        started_at: parse_time(&r.get::<_, String>(2)?),
+        duration: Duration::from_millis(r.get::<_, i64>(3)? as u64),
+        outcome: Outcome::parse(&r.get::<_, String>(4)?),
+        exit_code: r.get(5)?,
+        files: r.get::<_, i64>(6)? as u64,
+        bytes: r.get::<_, i64>(7)? as u64,
+        error: r.get(8)?,
+        log_path: r.get::<_, Option<String>>(9)?.map(PathBuf::from),
+        targets: Vec::new(),
+    })
+}
+
+/// A test restore's columns, as [`test_from_row`] reads them.
+const TEST_COLUMNS: &str =
+    "id, job, target, snapshot_id, started_at, duration_ms, outcome, checked, differing, detail";
+
+/// A test restore from a row of [`TEST_COLUMNS`].
+fn test_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TestRestoreRecord> {
+    Ok(TestRestoreRecord {
+        id: r.get(0)?,
+        job: r.get(1)?,
+        target: r.get(2)?,
+        snapshot_id: r.get(3)?,
+        started_at: parse_time(&r.get::<_, String>(4)?),
+        duration: Duration::from_millis(r.get::<_, i64>(5)? as u64),
+        outcome: Outcome::parse(&r.get::<_, String>(6)?),
+        checked: r.get::<_, i64>(7)? as u64,
+        differing: r.get::<_, i64>(8)? as u64,
+        detail: r.get(9)?,
+    })
+}
+
 /// A history file that can't be opened, read or written.
 #[derive(Debug)]
 pub struct HistoryError(pub rusqlite::Error);
@@ -187,6 +343,15 @@ impl History {
 
     fn with_connection(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(Duration::from_secs(10))?;
+        // Rust's lower case, for ordering by a job's name ignoring case beyond ASCII too, as
+        // the window does (SQLite's own `lower` folds ASCII only).
+        conn.create_scalar_function(
+            "unicode_lower",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| Ok(ctx.get::<String>(0)?.to_lowercase()),
+        )?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
         let version = conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? as usize;
         for (n, migration) in MIGRATIONS.iter().enumerate().skip(version) {
@@ -261,26 +426,12 @@ impl History {
     /// The most recent runs that `filter` lets through, newest first. The filter is applied
     /// before the limit, so an old run of a job is reached by asking for that job.
     pub fn runs(&self, filter: &HistoryFilter, limit: usize) -> Result<Vec<RunRecord>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, job, started_at, duration_ms, outcome, exit_code, files, bytes, error, log_path
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {RUN_COLUMNS}
              FROM runs WHERE (?1 IS NULL OR job = ?1 COLLATE NOCASE) AND (?2 IS NULL OR outcome = ?2)
-             ORDER BY started_at DESC, id DESC LIMIT ?3",
-        )?;
-        let rows = stmt.query_map(filter.params(limit), |r| {
-            Ok(RunRecord {
-                id: r.get(0)?,
-                job: r.get(1)?,
-                started_at: parse_time(&r.get::<_, String>(2)?),
-                duration: Duration::from_millis(r.get::<_, i64>(3)? as u64),
-                outcome: Outcome::parse(&r.get::<_, String>(4)?),
-                exit_code: r.get(5)?,
-                files: r.get::<_, i64>(6)? as u64,
-                bytes: r.get::<_, i64>(7)? as u64,
-                error: r.get(8)?,
-                log_path: r.get::<_, Option<String>>(9)?.map(PathBuf::from),
-                targets: Vec::new(),
-            })
-        })?;
+             ORDER BY started_at DESC, id DESC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(filter.params(limit), run_from_row)?;
         let mut runs = rows.collect::<std::result::Result<Vec<_>, _>>()?;
         for run in &mut runs {
             run.targets = self.targets_of(run.id)?;
@@ -371,27 +522,130 @@ impl History {
         filter: &HistoryFilter,
         limit: usize,
     ) -> Result<Vec<TestRestoreRecord>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, job, target, snapshot_id, started_at, duration_ms, outcome, checked, differing, detail
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TEST_COLUMNS}
              FROM test_restores
              WHERE (?1 IS NULL OR job = ?1 COLLATE NOCASE) AND (?2 IS NULL OR outcome = ?2)
-             ORDER BY started_at DESC, id DESC LIMIT ?3",
-        )?;
-        let rows = stmt.query_map(filter.params(limit), |r| {
-            Ok(TestRestoreRecord {
-                id: r.get(0)?,
-                job: r.get(1)?,
-                target: r.get(2)?,
-                snapshot_id: r.get(3)?,
-                started_at: parse_time(&r.get::<_, String>(4)?),
-                duration: Duration::from_millis(r.get::<_, i64>(5)? as u64),
-                outcome: Outcome::parse(&r.get::<_, String>(6)?),
-                checked: r.get::<_, i64>(7)? as u64,
-                differing: r.get::<_, i64>(8)? as u64,
-                detail: r.get(9)?,
-            })
-        })?;
+             ORDER BY started_at DESC, id DESC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(filter.params(limit), test_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// A page of the history as `query` lists it: runs and test restores together, filtered,
+    /// in its order, `limit` of them from `offset`, and how many there are of each kind and
+    /// result. Only that page's records are loaded.
+    ///
+    /// With `matches` (the window's search), the filtered entries are read one at a time in
+    /// that order and only those it keeps count: the page is the matches from `offset`. One
+    /// entry and the page are all that's held, whatever the search matches; but every filtered
+    /// entry is read, so a search costs a pass over them.
+    pub fn page(
+        &self,
+        query: &HistoryQuery,
+        offset: usize,
+        limit: usize,
+        mut matches: Option<&mut dyn FnMut(&Record) -> bool>,
+    ) -> Result<HistoryPage> {
+        let job = query.job.as_deref();
+        let outcome = query.outcome.map(Outcome::as_str);
+        let since = query.since.map(|s| s.to_rfc3339());
+        let filter = "(?1 IS NULL OR job = ?1 COLLATE NOCASE) AND (?2 IS NULL OR outcome = ?2)
+                      AND (?3 IS NULL OR started_at >= ?3)";
+        let listed = format!(
+            "SELECT 0 AS kind, id, job, started_at, duration_ms, outcome, files, bytes
+             FROM runs WHERE {filter}
+             UNION ALL
+             SELECT 1, id, job, started_at, duration_ms, outcome, checked, NULL
+             FROM test_restores WHERE {filter}"
+        );
+        let order = query.order_by();
+        let mut page = HistoryPage::default();
+        let window = offset..offset.saturating_add(limit);
+        let Some(matches) = matches.as_mut() else {
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT kind, outcome, COUNT(*) FROM ({listed}) GROUP BY kind, outcome"
+            ))?;
+            let mut rows = stmt.query(params![job, outcome, since])?;
+            while let Some(r) = rows.next()? {
+                let n = r.get::<_, i64>(2)? as usize;
+                page.counts.add(
+                    r.get::<_, i64>(0)? == 1,
+                    Outcome::parse(&r.get::<_, String>(1)?),
+                    n,
+                );
+            }
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT kind, id FROM ({listed}) ORDER BY {order} LIMIT ?4 OFFSET ?5"
+            ))?;
+            let keys = stmt
+                .query_map(
+                    params![
+                        job,
+                        outcome,
+                        since,
+                        limit.min(i64::MAX as usize) as i64,
+                        offset.min(i64::MAX as usize) as i64
+                    ],
+                    |r| Ok((r.get::<_, i64>(0)? == 1, r.get::<_, i64>(1)?)),
+                )?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            for (test, id) in keys {
+                page.records.extend(self.entry(test, id)?);
+            }
+            return Ok(page);
+        };
+        // Searched: every filtered entry in order, one at a time; the matches counted, and
+        // those in the page kept.
+        let mut stmt = self
+            .conn
+            .prepare(&format!("SELECT kind, id FROM ({listed}) ORDER BY {order}"))?;
+        let mut rows = stmt.query(params![job, outcome, since])?;
+        let mut found = 0;
+        while let Some(r) = rows.next()? {
+            let (test, id) = (r.get::<_, i64>(0)? == 1, r.get::<_, i64>(1)?);
+            let Some(record) = self.entry(test, id)? else {
+                continue;
+            };
+            if !matches(&record) {
+                continue;
+            }
+            page.counts.add(test, record.outcome(), 1);
+            if window.contains(&found) {
+                page.records.push(record);
+            }
+            found += 1;
+        }
+        Ok(page)
+    }
+
+    /// A run (or, if `test`, a test restore) by its ID, if it's there.
+    fn entry(&self, test: bool, id: i64) -> Result<Option<Record>> {
+        if test {
+            let record = self
+                .conn
+                .query_row(
+                    &format!("SELECT {TEST_COLUMNS} FROM test_restores WHERE id = ?1"),
+                    [id],
+                    test_from_row,
+                )
+                .optional()?;
+            Ok(record.map(Record::Test))
+        } else {
+            let run = self
+                .conn
+                .query_row(
+                    &format!("SELECT {RUN_COLUMNS} FROM runs WHERE id = ?1"),
+                    [id],
+                    run_from_row,
+                )
+                .optional()?;
+            let Some(mut run) = run else {
+                return Ok(None);
+            };
+            run.targets = self.targets_of(run.id)?;
+            Ok(Some(Record::Run(run)))
+        }
     }
 
     /// Every job name in the history (runs and test restores), each once ignoring case,
@@ -415,6 +669,113 @@ impl History {
             params![job, target, at.to_rfc3339()],
         )?;
         Ok(())
+    }
+}
+
+/// [`History::page`] over records already in memory: the same filter, order and paging,
+/// for a test's stand-in for the history.
+pub fn page_in_memory(
+    records: Vec<Record>,
+    query: &HistoryQuery,
+    offset: usize,
+    limit: usize,
+    mut matches: Option<&mut dyn FnMut(&Record) -> bool>,
+) -> HistoryPage {
+    let mut all: Vec<Record> = records
+        .into_iter()
+        .filter(|r| {
+            let (job, outcome, started) = match r {
+                Record::Run(r) => (&r.job, r.outcome, r.started_at),
+                Record::Test(t) => (&t.job, t.outcome, t.started_at),
+            };
+            query
+                .job
+                .as_ref()
+                .is_none_or(|j| j.eq_ignore_ascii_case(job))
+                && query.outcome.is_none_or(|o| o == outcome)
+                && query.since.is_none_or(|s| started >= s)
+        })
+        .collect();
+    all.sort_by(|a, b| {
+        let (ka, kb) = (sort_keys(a), sort_keys(b));
+        let primary = match query.sort {
+            None => std::cmp::Ordering::Equal,
+            Some((column, up)) => {
+                let o = match column {
+                    SortBy::Started => ka.0.cmp(&kb.0),
+                    SortBy::Job => ka.3.cmp(&kb.3),
+                    SortBy::Result => ka.4.cmp(&kb.4),
+                    SortBy::Duration => ka.5.cmp(&kb.5),
+                    SortBy::Files => ka.6.cmp(&kb.6),
+                    SortBy::Size => ka.7.cmp(&kb.7),
+                };
+                if up { o } else { o.reverse() }
+            }
+        };
+        // The ties, as `HistoryQuery::order_by`'s: newest first, runs first, later recorded
+        // first.
+        primary
+            .then(kb.0.cmp(&ka.0))
+            .then(ka.1.cmp(&kb.1))
+            .then(kb.2.cmp(&ka.2))
+    });
+    let mut page = HistoryPage::default();
+    let mut found = 0;
+    for record in all {
+        if matches.as_mut().is_some_and(|m| !m(&record)) {
+            continue;
+        }
+        page.counts
+            .add(matches!(record, Record::Test(_)), record.outcome(), 1);
+        if found >= offset && found - offset < limit {
+            page.records.push(record);
+        }
+        found += 1;
+    }
+    page
+}
+
+/// An entry's sort keys: started, whether a test restore, ID, job (lower case), result's rank
+/// (worse higher), duration, files, size.
+type SortKeys = (
+    DateTime<Utc>,
+    bool,
+    i64,
+    String,
+    u8,
+    Duration,
+    u64,
+    Option<u64>,
+);
+
+fn sort_keys(r: &Record) -> SortKeys {
+    let rank = |o: Outcome| match o {
+        Outcome::Ok => 0,
+        Outcome::Skipped => 1,
+        Outcome::Partly => 2,
+        Outcome::Failed => 3,
+    };
+    match r {
+        Record::Run(r) => (
+            r.started_at,
+            false,
+            r.id,
+            r.job.to_lowercase(),
+            rank(r.outcome),
+            r.duration,
+            r.files,
+            Some(r.bytes),
+        ),
+        Record::Test(t) => (
+            t.started_at,
+            true,
+            t.id,
+            t.job.to_lowercase(),
+            rank(t.outcome),
+            t.duration,
+            t.checked,
+            None,
+        ),
     }
 }
 
@@ -676,5 +1037,217 @@ mod tests {
         history
             .record_verify("hive", "External HDD", t0 + chrono::Duration::hours(3))
             .unwrap();
+    }
+
+    // --- Paging (the window's history) --------------------------------------------------
+
+    use crate::run::TargetReport;
+
+    // Names beyond ASCII in both cases: "Я" sorts after "а" ignoring case, before it by bytes.
+    const JOBS: [&str; 5] = ["docs", "Music", "photos", "Яблоко", "архив"];
+    const OUTCOMES: [Outcome; 4] = [
+        Outcome::Ok,
+        Outcome::Failed,
+        Outcome::Partly,
+        Outcome::Skipped,
+    ];
+
+    /// A history of `runs` runs and `tests` test restores, every few at the same moment (so
+    /// ties are ordered too), with jobs, results, durations, files and sizes that vary.
+    fn mixed(runs: usize, tests: usize) -> History {
+        let mut history = History::in_memory().unwrap();
+        let t0 = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let at = |i: usize| t0 + chrono::Duration::minutes((i / 3) as i64 * 7);
+        for i in 0..runs {
+            history
+                .record(&RunReport {
+                    id: None,
+                    job: JOBS[i % JOBS.len()].into(),
+                    started_at: at(i),
+                    duration: Duration::from_secs((i * 37 % 101) as u64),
+                    outcome: OUTCOMES[i % 4],
+                    error: (i % 5 == 0).then(|| format!("error {i}")),
+                    targets: vec![TargetReport {
+                        target: format!("drive-{}", i % 2),
+                        mode: "versioned",
+                        outcome: OUTCOMES[i % 4],
+                        reason: Some(format!("reason {i}")),
+                        files: (i * 13 % 97) as u64,
+                        bytes: (i * 7919 % 10007) as u64,
+                        snapshot_id: None,
+                        problems: Vec::new(),
+                        clashes: Vec::new(),
+                    }],
+                    log_path: None,
+                    waits: Vec::new(),
+                    gave_way: false,
+                })
+                .unwrap();
+        }
+        for i in 0..tests {
+            history
+                .record_test_restore(&TestRestoreRecord {
+                    id: 0,
+                    job: JOBS[(i + 1) % JOBS.len()].into(),
+                    target: "nas".into(),
+                    snapshot_id: None,
+                    started_at: at(i * 5),
+                    duration: Duration::from_secs((i * 11 % 53) as u64),
+                    outcome: OUTCOMES[(i + 1) % 4],
+                    checked: (i * 3 % 41) as u64,
+                    differing: 0,
+                    detail: Some(format!("detail {i}")),
+                })
+                .unwrap();
+        }
+        history
+    }
+
+    /// Every entry `query` lets through, in its order, worked out in memory from all of them.
+    fn expected(history: &History, query: &HistoryQuery) -> Vec<Record> {
+        let all: Vec<Record> = history
+            .runs(&HistoryFilter::default(), usize::MAX)
+            .unwrap()
+            .into_iter()
+            .map(Record::Run)
+            .chain(
+                history
+                    .test_restores(&HistoryFilter::default(), usize::MAX)
+                    .unwrap()
+                    .into_iter()
+                    .map(Record::Test),
+            )
+            .collect();
+        page_in_memory(all, query, 0, usize::MAX, None).records
+    }
+
+    /// Every page of `query`, `size` a page, joined.
+    fn all_pages(history: &History, query: &HistoryQuery, size: usize) -> (Counts, Vec<Record>) {
+        let mut joined = Vec::new();
+        let first = history.page(query, 0, size, None).unwrap();
+        let counts = first.counts;
+        joined.extend(first.records);
+        let mut offset = size;
+        while offset < counts.total() {
+            let page = history.page(query, offset, size, None).unwrap();
+            assert_eq!(page.counts, counts, "every page counts the same");
+            assert!(page.records.len() <= size);
+            joined.extend(page.records);
+            offset += size;
+        }
+        (counts, joined)
+    }
+
+    #[test]
+    fn the_pages_of_every_order_and_filter_join_up_to_the_whole_list() {
+        let history = mixed(260, 52);
+        let since = chrono::DateTime::parse_from_rfc3339("2026-01-02T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut queries = vec![
+            HistoryQuery::default(),
+            HistoryQuery {
+                job: Some("MUSIC".into()),
+                ..Default::default()
+            },
+            HistoryQuery {
+                outcome: Some(Outcome::Failed),
+                ..Default::default()
+            },
+            HistoryQuery {
+                since: Some(since),
+                ..Default::default()
+            },
+        ];
+        for column in [
+            SortBy::Started,
+            SortBy::Job,
+            SortBy::Result,
+            SortBy::Duration,
+            SortBy::Files,
+            SortBy::Size,
+        ] {
+            for up in [true, false] {
+                queries.push(HistoryQuery {
+                    sort: Some((column, up)),
+                    ..Default::default()
+                });
+            }
+        }
+        for query in &queries {
+            let want = expected(&history, query);
+            for size in [25, 50, 100] {
+                let (counts, joined) = all_pages(&history, query, size);
+                assert_eq!(counts.total(), want.len(), "{query:?}");
+                assert_eq!(joined, want, "{query:?}, {size} a page");
+            }
+        }
+        // Everything: 260 runs and 52 test restores, by result.
+        let counts = history
+            .page(&HistoryQuery::default(), 0, 50, None)
+            .unwrap()
+            .counts;
+        assert_eq!((counts.runs, counts.tests, counts.total()), (260, 52, 312));
+        assert_eq!(
+            counts.ok + counts.failed + counts.partly + counts.skipped,
+            312
+        );
+        assert_eq!(counts.of(Outcome::Failed), 65 + 13);
+        // Past the end: none, still counted.
+        let past = history
+            .page(&HistoryQuery::default(), 400, 50, None)
+            .unwrap();
+        assert!(past.records.is_empty());
+        assert_eq!(past.counts.total(), 312);
+    }
+
+    #[test]
+    fn a_search_counts_its_matches_and_keeps_only_the_page() {
+        let history = mixed(260, 52);
+        let query = HistoryQuery {
+            sort: Some((SortBy::Duration, true)),
+            ..Default::default()
+        };
+        let want = expected(&history, &query);
+        // A search that matches everything, page 4 at 25: rows 76 to 100, and 312 counted.
+        let mut seen = 0;
+        let mut everything = |_: &Record| {
+            seen += 1;
+            true
+        };
+        let page = history.page(&query, 75, 25, Some(&mut everything)).unwrap();
+        assert_eq!(seen, 312, "each entry read once");
+        assert_eq!(page.counts.total(), 312);
+        assert_eq!(page.records, want[75..100]);
+        // A narrower one: the failed music runs, and the counts of only those.
+        let failed_music = |r: &Record| matches!(r, Record::Run(r) if r.job == "Music" && r.outcome == Outcome::Failed);
+        let mut matcher = failed_music;
+        let page = history.page(&query, 0, 10, Some(&mut matcher)).unwrap();
+        let wanted: Vec<&Record> = want.iter().filter(|r| failed_music(r)).collect();
+        assert_eq!(page.counts.total(), wanted.len());
+        assert_eq!((page.counts.runs, page.counts.tests), (wanted.len(), 0));
+        assert_eq!(page.counts.failed, wanted.len());
+        assert_eq!(page.records.iter().collect::<Vec<_>>(), wanted[..10]);
+    }
+
+    /// How long a search takes over a big history: 10,000 entries, each read and matched
+    /// (`cargo test -p replica-core search_time -- --ignored --nocapture`). Not a test of
+    /// speed: a figure to report.
+    #[test]
+    #[ignore = "a timing to report, not a check"]
+    fn search_time() {
+        let history = mixed(8_000, 2_000);
+        let start = std::time::Instant::now();
+        let mut text = |r: &Record| format!("{r:?}").contains("reason 9999");
+        let page = history
+            .page(&HistoryQuery::default(), 0, 50, Some(&mut text))
+            .unwrap();
+        println!(
+            "searched 10000 entries in {:?} ({} found)",
+            start.elapsed(),
+            page.counts.total()
+        );
     }
 }

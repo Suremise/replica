@@ -25,6 +25,9 @@ log_retention_days = 30
 repository_wait_minutes = 120
 # Show the status bar along the bottom of the window (default true). View > Status bar sets it.
 show_status_bar = true
+# How many rows each of the window's tables shows a page: 25, 50 or 100 (default 50). Its
+# choice under any table sets it.
+table_page_size = 50
 
 # Jobs. Each [[jobs]] table is one job; docs/settings.example.toml has examples.
 

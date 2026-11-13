@@ -54,6 +54,14 @@ pub enum Icon {
     Export,
     /// An arrow down into a tray, for importing.
     Import,
+    /// A chevron left against a bar, for the first page.
+    First,
+    /// A chevron left, for the previous page.
+    Previous,
+    /// A chevron right, for the next page.
+    Next,
+    /// A chevron right against a bar, for the last page.
+    Last,
 }
 
 impl Icon {
@@ -192,6 +200,16 @@ impl Icon {
                 line(&[(0.18, 0.5), (0.82, 0.5)]);
             }
             Icon::Play => line(&[(0.26, 0.14), (0.82, 0.5), (0.26, 0.86), (0.26, 0.14)]),
+            Icon::Previous => line(&[(0.64, 0.18), (0.32, 0.5), (0.64, 0.82)]),
+            Icon::Next => line(&[(0.36, 0.18), (0.68, 0.5), (0.36, 0.82)]),
+            Icon::First => {
+                line(&[(0.72, 0.18), (0.4, 0.5), (0.72, 0.82)]);
+                line(&[(0.26, 0.18), (0.26, 0.82)]);
+            }
+            Icon::Last => {
+                line(&[(0.28, 0.18), (0.6, 0.5), (0.28, 0.82)]);
+                line(&[(0.74, 0.18), (0.74, 0.82)]);
+            }
             Icon::Stop => {
                 painter.rect_stroke(
                     Rect::from_min_max(at(0.2, 0.2), at(0.8, 0.8)),

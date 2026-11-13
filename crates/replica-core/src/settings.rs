@@ -55,6 +55,28 @@ pub struct AppSettings {
     pub repository_wait_minutes: u32,
     /// Whether the window shows its status bar (View > Status bar).
     pub show_status_bar: bool,
+    /// How many rows each of the window's tables shows a page: 25, 50 or 100 (another number
+    /// is read as the nearest of those, [`AppSettings::page_size`]).
+    pub table_page_size: u32,
+}
+
+/// The page sizes a table offers.
+pub const PAGE_SIZES: [u32; 3] = [25, 50, 100];
+
+impl AppSettings {
+    /// The tables' page size: [`AppSettings::table_page_size`], or the nearest of
+    /// [`PAGE_SIZES`] to it (the smaller, when it's between two equally).
+    pub fn page_size(&self) -> u32 {
+        nearest_page_size(self.table_page_size)
+    }
+}
+
+/// The nearest of [`PAGE_SIZES`] to `n` (the smaller, when it's between two equally).
+pub fn nearest_page_size(n: u32) -> u32 {
+    *PAGE_SIZES
+        .iter()
+        .min_by_key(|&&size| (size.abs_diff(n), size))
+        .unwrap_or(&50)
 }
 
 impl Default for AppSettings {
@@ -68,6 +90,7 @@ impl Default for AppSettings {
             log_retention_days: 30,
             repository_wait_minutes: 120,
             show_status_bar: true,
+            table_page_size: 50,
         }
     }
 }
@@ -318,6 +341,11 @@ impl Settings {
             "Show the status bar along the bottom of the window (default true). View > Status bar sets it.",
             "show_status_bar",
             &app.show_status_bar.to_string(),
+        );
+        w.key(
+            "How many rows each of the window's tables shows a page: 25, 50 or 100 (default 50). Its\nchoice under any table sets it.",
+            "table_page_size",
+            &app.table_page_size.to_string(),
         );
 
         w.blank();
@@ -772,6 +800,7 @@ mod tests {
                 log_retention_days: 14,
                 repository_wait_minutes: 45,
                 show_status_bar: false,
+                table_page_size: 100,
             },
             jobs: vec![
                 Job {
@@ -1379,6 +1408,28 @@ mod tests {
     }
 
     #[test]
+    fn a_page_size_is_read_as_the_nearest_offered() {
+        for (n, size) in [
+            (0, 25),
+            (25, 25),
+            (37, 25),
+            (38, 50),
+            (50, 50),
+            (75, 50),
+            (76, 100),
+            (100, 100),
+            (5000, 100),
+        ] {
+            let app = AppSettings {
+                table_page_size: n,
+                ..AppSettings::default()
+            };
+            assert_eq!(app.page_size(), size, "{n}");
+        }
+        assert_eq!(AppSettings::default().page_size(), 50);
+    }
+
+    #[test]
     fn example_file_loads() {
         let text = include_str!("../../../docs/settings.example.toml");
         let loaded = Settings::parse(text).unwrap_or_else(|e| panic!("{e}"));
@@ -1396,7 +1447,7 @@ mod tests {
     /// Each released version's `settings.toml` and exported jobs, as that release wrote them
     /// from [`full`] (`fixtures/releases`; a release adds its own): their status bar setting,
     /// which 0.3.0 added and writes as `false`. None has `check_for_updates`, which loads as
-    /// off.
+    /// off, or `table_page_size`, which loads as 50.
     const RELEASED: [(&str, &str, &str, bool); 3] = [
         (
             "0.1.0",
@@ -1426,6 +1477,7 @@ mod tests {
             let mut want = full();
             want.app.show_status_bar = show_status_bar;
             want.app.check_for_updates = false;
+            want.app.table_page_size = 50;
             assert_eq!(loaded.settings, want, "{version}'s settings");
             assert_eq!(loaded.warnings, [], "{version}'s settings");
             assert_eq!(

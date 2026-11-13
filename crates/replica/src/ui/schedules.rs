@@ -23,8 +23,8 @@ use super::settings::ask;
 use super::theme::{self, space};
 use super::widgets::{
     InfoKind, TableColumn, TableState, Tone, danger_button, empty_state, flow, icon_button,
-    info_bar, path_label, relative_time, secondary_button, section_card_with_actions, small_toggle,
-    status_chip, table, table_frame,
+    info_bar, pager, path_label, relative_time, secondary_button, section_card_with_actions,
+    small_toggle, status_chip, table, table_frame,
 };
 
 /// How often it reads the settings and the tasks again while shown.
@@ -182,6 +182,8 @@ impl SchedulesTab {
                 &tr("tasks-none"),
                 None,
             );
+            // Under every table, its pager: "0 of 0" here.
+            pager(ui, &mut self.task_table, 0);
             return;
         }
         let columns = [
@@ -226,6 +228,8 @@ impl SchedulesTab {
                     });
                 });
         });
+        // Outside the sideways scrolling, so its controls stay in reach in a narrow window.
+        pager(ui, &mut self.task_table, tasks.len());
         match action {
             Some(TaskAction::Enable(name, on)) => {
                 let result = self.backend.set_task_enabled(&name, on);

@@ -30,9 +30,9 @@ use super::theme::{self, space};
 use super::widgets::{
     InfoKind, TableColumn, TableState, Tone, danger_button_filled, dialog_frame, dropdown,
     dropdown_choice, dropdown_value, dropdown_width, empty_state, error_text, flow, heading,
-    info_bar, info_row, leaving_room, primary_button, quiet_mono, quiet_text, relative_time,
-    secondary_button, section_card, section_card_with_actions, size_text, status_chip, table,
-    table_frame, tag, tree_folder,
+    info_bar, info_row, leaving_room, page_size, pager, primary_button, quiet_mono, quiet_text,
+    relative_time, secondary_button, section_card, section_card_with_actions, size_text,
+    status_chip, table, table_frame, tag, tree_folder,
 };
 
 /// The job and backup pickers' widest, closed: a longer name is cut with "…".
@@ -321,6 +321,8 @@ impl RestoreTab {
     fn reset_snapshots(&mut self) {
         self.snapshots = None;
         self.snapshot = None;
+        // Another job's or target's list starts at its first page.
+        self.snapshot_table.page = 0;
         self.reset_browse();
     }
 
@@ -455,10 +457,16 @@ impl RestoreTab {
                 &tr("restore-no-snapshots"),
                 None,
             );
+            // Under every table, its pager: "0 of 0" here.
+            pager(ui, &mut self.snapshot_table, 0);
             return true;
         }
         if let Some(id) = self.choose_next.take() {
             self.snapshot = snapshots.iter().find(|s| s.id == id).cloned();
+            // On the page it's on.
+            if let Some(i) = snapshots.iter().position(|s| s.id == id) {
+                self.snapshot_table.page = i / page_size(ui.ctx());
+            }
         }
         self.snapshot_table.selected = self
             .snapshot
@@ -481,7 +489,8 @@ impl RestoreTab {
                     &tr("restore-snapshot"),
                     &columns,
                     snapshots.len(),
-                    Some(220.0),
+                    // A page of rows, as tall as they are: the page scrolls.
+                    None,
                     &mut self.snapshot_table,
                     |i| snapshot_line(&snapshots[i]),
                     |_| {},
@@ -505,6 +514,7 @@ impl RestoreTab {
                 )
             })
             .inner;
+        pager(ui, &mut self.snapshot_table, snapshots.len());
         self.pin_row(ui, job, target);
         if response.selection_changed
             && let Some(s) = self.snapshot_table.selected.and_then(|i| snapshots.get(i))

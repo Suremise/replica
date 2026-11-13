@@ -26,6 +26,13 @@ All notable changes to Replica are recorded here. The format is based on
   of Settings. Settings' tab for what runs the schedules and pausing them is now **Scheduling**,
   and links to the page.
 - The sidebar no longer repeats Replica's logo and name at its top: the title bar has them.
+- Every table (Jobs, History, Restore's snapshots, Schedules' tasks) shows a page of rows at a
+  time, with a pager under it: which rows show ("51–100 of 312"), first, previous, next and
+  last page, and **Rows per page** (25, 50 or 100, one choice for every table, remembered).
+  Page Up and Page Down turn the page. Sorting, filtering and searching cover the whole list
+  and go back to the first page. History reads only the page you're on, so it stays quick
+  however long it gets, and its search now looks through every run, not just those loaded;
+  **Show older** is gone. Restore's snapshots are no longer in a small box of their own.
 
 ### Fixed
 

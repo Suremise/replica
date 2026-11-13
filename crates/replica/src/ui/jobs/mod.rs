@@ -31,10 +31,11 @@ use super::backend::{Backend, Status, UiRequest, change_settings};
 use super::icons::Icon;
 use super::theme::{self, space};
 use super::widgets::{
-    InfoKind, TableColumn, TableState, Tone, card_frame, cell_status_chip, command_button,
-    danger_button_filled, dialog_frame, empty_state, flow, heading, icon_button, info_chip,
-    leaving_room, message_bar, path_label, primary_button_with_icon, progress_chip, relative_time,
-    secondary_button, small_toggle, table, table_frame, tag, tag_width, toolbar, toolbar_separator,
+    InfoKind, PAGER_HEIGHT, TableColumn, TableState, Tone, card_frame, cell_status_chip,
+    command_button, danger_button_filled, dialog_frame, empty_state, flow, heading, icon_button,
+    info_chip, leaving_room, message_bar, page_size, pager, path_label, primary_button_with_icon,
+    progress_chip, relative_time, secondary_button, small_toggle, table, table_frame, tag,
+    tag_width, toolbar, toolbar_separator,
 };
 
 /// How often the tab looks for a changed settings file (an edit by hand, the CLI, the tray).
@@ -123,6 +124,9 @@ pub struct JobsTab {
     import: Option<ImportDialog>,
     /// A job to select in the table once it's listed (one just imported).
     select: Option<String>,
+    /// The job chosen in the table, by name: its row is found again each frame, so the choice
+    /// stays with it as runs reorder the list, whichever page it's on.
+    chosen: Option<String>,
 }
 
 impl JobsTab {
@@ -139,6 +143,7 @@ impl JobsTab {
             export: None,
             import: None,
             select: None,
+            chosen: None,
         };
         tab.load();
         tab
@@ -261,6 +266,8 @@ impl JobsTab {
                     self.edit(None);
                 }
             });
+            // Under every table, its pager: "0 of 0" here.
+            pager(ui, &mut self.table, 0);
         } else if self.settings.is_ok() {
             self.table(ui, editable, &status);
         }
@@ -292,11 +299,12 @@ impl JobsTab {
         }
     }
 
-    /// The selected row's job, in the table's order.
+    /// The job chosen in the table, if it's still there.
     fn selected_name(&self) -> Option<String> {
-        let row = self.table.selected?;
-        self.sorted_jobs(&self.backend.status())
-            .get(row)
+        let chosen = self.chosen.as_ref()?;
+        self.jobs()
+            .iter()
+            .find(|j| j.name.eq_ignore_ascii_case(chosen))
             .map(|j| j.name.clone())
     }
 
@@ -404,7 +412,20 @@ impl JobsTab {
         let now = Utc::now();
         let jobs = self.sorted_jobs(status);
         if let Some(name) = self.select.take() {
-            self.table.selected = jobs.iter().position(|j| j.name.eq_ignore_ascii_case(&name));
+            // Shown on the page it's on.
+            if let Some(i) = jobs.iter().position(|j| j.name.eq_ignore_ascii_case(&name)) {
+                self.table.page = i / page_size(ui.ctx());
+            }
+            self.chosen = Some(name);
+        }
+        // The chosen job's row in the order now (a run may have moved it); the page stays where
+        // the user left it, so it may be on another one.
+        self.table.selected = self
+            .chosen
+            .as_ref()
+            .and_then(|name| jobs.iter().position(|j| j.name.eq_ignore_ascii_case(name)));
+        if self.table.selected.is_none() {
+            self.chosen = None;
         }
         let cols: Vec<Col> = [
             Col::On,
@@ -459,7 +480,8 @@ impl JobsTab {
         let mut delete = None;
         let mut export = None;
         let p = theme::of(ui);
-        let height = ui.available_height() - 4.0;
+        // The rows scroll in what's left above the pager, which stays in view under them.
+        let height = ui.available_height() - 4.0 - PAGER_HEIGHT - space::S;
         let response = table_frame(p)
             .show(ui, |ui| {
                 // The wide and the narrow table keep their column widths apart.
@@ -535,6 +557,14 @@ impl JobsTab {
                 .inner
             })
             .inner;
+        pager(ui, &mut self.table, jobs.len());
+        if response.selection_changed {
+            self.chosen = self
+                .table
+                .selected
+                .and_then(|i| jobs.get(i))
+                .map(|j| j.name.clone());
+        }
         if let Some(row) = response.activated
             && editable
         {
@@ -606,6 +636,7 @@ impl JobsTab {
             return;
         }
         self.table.selected = None;
+        self.chosen = None;
         self.message = Some((false, tr!("jobs-deleted", job = name)));
         if has_task && let Err(e) = self.backend.delete_task(name) {
             self.message = Some((true, tr!("jobs-delete-task-failed", error = e)));

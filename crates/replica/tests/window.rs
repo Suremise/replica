@@ -1612,8 +1612,8 @@ fn a_test_restore_shows_which_file_differs() {
 #[test]
 fn history_reaches_runs_beyond_the_first_page() {
     let (fake, _dir) = backend(vec![]);
-    let page = replica::ui::history::PAGE as i64;
-    // A page and a half of newer runs, then one old failure of a job not run since.
+    // A page and a half of newer runs (50 a page), then one old failure of a job not run since.
+    let page = 50;
     let mut runs: Vec<RunRecord> = (1..=page + page / 2)
         .map(|i| run_record(i, "docs", Outcome::Ok))
         .collect();
@@ -1622,35 +1622,30 @@ fn history_reaches_runs_beyond_the_first_page() {
     let mut harness = history_harness(&fake);
     harness.run();
     assert_eq!(harness.state().shown().len(), page as usize);
-    assert!(harness.state().has_older());
+    harness.get_by_label("1–50 of 76");
     assert!(harness.query_by_label_contains("archive").is_none());
 
     // Filtering asks the history itself: the old job is there to pick, and its run is found.
     harness.state_mut().job = Some("archive".into());
-    harness.state_mut().load();
     harness.run();
     assert_eq!(harness.state().shown().len(), 1);
+    harness.get_by_label("1–1 of 1");
     harness.get_by_label_contains("archive");
 
-    // So is paging back through everything.
+    // So is paging to the end of everything: pressed as a screen reader would.
     harness.state_mut().job = None;
-    harness.state_mut().load();
     harness.run();
-    // At the end of a long list: pressed as a screen reader would, without scrolling to it.
-    harness.get_by_label("Show older").click_accesskit();
+    harness.get_by_label("Last page").click_accesskit();
     harness.run();
-    assert_eq!(
-        harness.state().shown().len(),
-        (page + page / 2 + 1) as usize
-    );
-    assert!(!harness.state().has_older());
+    assert_eq!(harness.state().shown().len(), 26);
+    harness.get_by_label("51–76 of 76");
     harness.get_by_label_contains("archive");
 }
 
 #[test]
 fn history_offers_every_job_in_it_to_filter_by() {
     let (fake, _dir) = backend(vec![]);
-    let page = replica::ui::history::PAGE as i64;
+    let page = 50;
     let mut runs: Vec<RunRecord> = (1..=page)
         .map(|i| run_record(i, "docs", Outcome::Ok))
         .collect();

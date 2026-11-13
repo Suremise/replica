@@ -1083,6 +1083,33 @@ fn screens(fixture: &Fixture) -> Vec<(&'static str, Shoot<'_>)> {
             save(&mut harness, v.scale, path);
         }),
     ));
+    // Paged: History's 312 runs and test restores on page 2, and Restore's 120 snapshots.
+    screens.push((
+        "history-paged",
+        Box::new(|v: Variant, path: &Path| {
+            let fixture = Fixture::with_data(|f| f.with_many_runs(260, 52));
+            let mut harness = v.builder(2100.0).build_ui_state(
+                |ui, shell: &mut Shell| shell.show(ui),
+                fixture.shell(Tab::History),
+            );
+            let _ = harness.try_run();
+            turn(&mut harness, "Next page");
+            save(&mut harness, v.scale, path);
+        }),
+    ));
+    screens.push((
+        "restore-paged",
+        Box::new(|v: Variant, path: &Path| {
+            let fixture = Fixture::with_data(|f| f.with_many_snapshots(120));
+            let mut shell = fixture.shell(Tab::Restore);
+            shell.restore.job = Some("Documents".into());
+            let mut harness = v
+                .builder(2100.0)
+                .build_ui_state(|ui, shell: &mut Shell| shell.show(ui), shell);
+            restore_steps(&mut harness, 1);
+            save(&mut harness, v.scale, path);
+        }),
+    ));
     screens.push((
         "history-empty",
         Box::new(|v: Variant, path: &Path| {
@@ -2313,4 +2340,487 @@ fn the_last_test_restore_shown_is_the_chosen_targets() {
     pick(&mut harness, "Job", "Photos");
     until(&mut harness, |h| shows(h, "Never run"));
     assert!(!shows(&harness, "OK") && !shows(&harness, "Failed"));
+}
+
+// --- Tables in pages ------------------------------------------------------------------------
+
+/// The shell on `tab`, `width` by `height`, its first frames run.
+fn shell_on(fixture: &Fixture, tab: Tab, width: f32, height: f32) -> Harness<'_, Shell> {
+    let mut harness = Harness::builder()
+        .with_size([width, height])
+        .with_max_steps(64)
+        .with_context_setup(|ctx| {
+            replica::ui::fonts::install(ctx).unwrap();
+            replica::ui::style(ctx);
+        })
+        .build_ui_state(|ui, shell: &mut Shell| shell.show(ui), fixture.shell(tab));
+    let _ = harness.try_run();
+    harness
+}
+
+/// What the pager says of the rows shown ("51–100 of 312", "0 of 0").
+fn pager_says(harness: &Harness<'_, Shell>) -> String {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    // "first–last of total", or "0 of 0": digits, a dash, " of " and digits, nothing else.
+    let is_range = |l: &str| {
+        let Some((shown, total)) = l.split_once(" of ") else {
+            return false;
+        };
+        let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+        digits(total)
+            && (shown == "0"
+                || shown
+                    .split_once('–')
+                    .is_some_and(|(a, b)| digits(a) && digits(b)))
+    };
+    // A text's words are its node's value (a button's, its label).
+    harness
+        .query_all(egui_kittest::kittest::By::new().include_labels())
+        .filter_map(|n| {
+            let node = n.accesskit_node();
+            node.label().or_else(|| node.value().map(|v| v.to_string()))
+        })
+        .find(|l| is_range(l))
+        .unwrap_or_default()
+}
+
+/// Presses one of the pager's buttons, as a screen reader would.
+fn turn(harness: &mut Harness<'_, Shell>, button: &str) {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    harness
+        .get_by_role_and_label(Role::Button, button)
+        .click_accesskit();
+    let _ = harness.try_run();
+}
+
+/// Chooses `size` rows a page under the table shown.
+fn rows_a_page(harness: &mut Harness<'_, Shell>, size: u32) {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    harness
+        .get_all_by_label("Rows per page")
+        .find(|n| n.accesskit_node().role() == eframe::egui::accesskit::Role::ComboBox)
+        .expect("the size's dropdown")
+        .click_accesskit();
+    let _ = harness.try_run();
+    harness
+        .get_all_by_label(&size.to_string())
+        .last()
+        .expect("the size, in the dropdown's list")
+        .click_accesskit();
+    let _ = harness.try_run();
+}
+
+/// The fake's whole history as `query` lists it, worked out from all of it.
+fn whole_history(
+    fixture: &Fixture,
+    query: &replica_core::history::HistoryQuery,
+) -> Vec<(bool, i64)> {
+    use replica_core::history::{Record, page_in_memory};
+    let records = fixture
+        .backend
+        .runs
+        .lock()
+        .unwrap()
+        .iter()
+        .cloned()
+        .map(Record::Run)
+        .chain(
+            fixture
+                .backend
+                .tests
+                .lock()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(Record::Test),
+        )
+        .collect();
+    page_in_memory(records, query, 0, usize::MAX, None)
+        .records
+        .iter()
+        .map(|r| match r {
+            Record::Run(r) => (false, r.id),
+            Record::Test(t) => (true, t.id),
+        })
+        .collect()
+}
+
+/// The entries History shows now, by key.
+fn history_shown(harness: &Harness<'_, Shell>) -> Vec<(bool, i64)> {
+    harness
+        .state()
+        .history
+        .shown()
+        .iter()
+        .map(|e| e.key())
+        .collect()
+}
+
+/// History pages through 312 runs and test restores, 50 a page, counting them all: the
+/// pager's buttons (named for a screen reader) go forward, back, to the end and the start, and
+/// each page is the right slice of the whole list, the kinds merged by when they started.
+#[test]
+fn history_pages_through_runs_and_test_restores_and_counts_them_all() {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let fixture = Fixture::with_data(|f| f.with_many_runs(260, 52));
+    let mut harness = shell_on(&fixture, Tab::History, 1200.0, 2400.0);
+    let all = whole_history(&fixture, &Default::default());
+    assert_eq!(all.len(), 312);
+    assert_eq!(pager_says(&harness), "1–50 of 312");
+    assert_eq!(history_shown(&harness), all[..50]);
+    harness.get_by_label_contains("260 runs");
+    harness.get_by_label_contains("52 test restores");
+    // At the start, there's no way back.
+    for (button, disabled) in [
+        ("First page", true),
+        ("Previous page", true),
+        ("Next page", false),
+        ("Last page", false),
+    ] {
+        let node = harness.get_by_role_and_label(Role::Button, button);
+        assert_eq!(node.accesskit_node().is_disabled(), disabled, "{button}");
+    }
+
+    turn(&mut harness, "Next page");
+    assert_eq!(pager_says(&harness), "51–100 of 312");
+    assert_eq!(history_shown(&harness), all[50..100]);
+    turn(&mut harness, "Previous page");
+    assert_eq!(pager_says(&harness), "1–50 of 312");
+    turn(&mut harness, "Last page");
+    assert_eq!(pager_says(&harness), "301–312 of 312");
+    assert_eq!(history_shown(&harness), all[300..]);
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, "Next page")
+            .accesskit_node()
+            .is_disabled()
+    );
+    turn(&mut harness, "First page");
+    assert_eq!(pager_says(&harness), "1–50 of 312");
+}
+
+/// The page size is chosen under any table and saved for all of them; a new size keeps the
+/// first row in view, and stays within the list at its end.
+#[test]
+fn the_page_size_is_remembered_and_keeps_the_first_row_in_view() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let fixture = Fixture::with_data(|f| f.with_many_runs(260, 52));
+    let mut harness = shell_on(&fixture, Tab::History, 1200.0, 4000.0);
+    let all = whole_history(&fixture, &Default::default());
+    turn(&mut harness, "Next page");
+    turn(&mut harness, "Next page");
+    assert_eq!(pager_says(&harness), "101–150 of 312");
+
+    rows_a_page(&mut harness, 25);
+    assert_eq!(pager_says(&harness), "101–125 of 312");
+    assert_eq!(history_shown(&harness), all[100..125]);
+    let saved = || {
+        Settings::load(&fixture.backend.settings_file())
+            .unwrap()
+            .settings
+            .app
+            .table_page_size
+    };
+    assert_eq!(saved(), 25, "saved in settings.toml");
+    rows_a_page(&mut harness, 100);
+    assert_eq!(pager_says(&harness), "101–200 of 312");
+    assert_eq!(saved(), 100);
+
+    // At the end of the list: page 7 at 50, then 25, then 100, still shows its last rows.
+    rows_a_page(&mut harness, 50);
+    turn(&mut harness, "Last page");
+    assert_eq!(pager_says(&harness), "301–312 of 312");
+    rows_a_page(&mut harness, 25);
+    assert_eq!(pager_says(&harness), "301–312 of 312");
+    rows_a_page(&mut harness, 100);
+    assert_eq!(pager_says(&harness), "301–312 of 312");
+    assert_eq!(history_shown(&harness), all[300..]);
+
+    // Every table has it: Jobs' pager says 100 a page too.
+    harness.state_mut().tab = Tab::Jobs;
+    let _ = harness.try_run();
+    let size = harness
+        .get_all_by_label("Rows per page")
+        .find(|n| n.accesskit_node().role() == eframe::egui::accesskit::Role::ComboBox)
+        .and_then(|n| n.accesskit_node().value().map(|v| v.to_string()));
+    assert_eq!(size.as_deref(), Some("100"));
+}
+
+/// A sort orders the whole history, not a page of it, and goes back to the first page; so
+/// does a filter, which counts only what it lets through.
+#[test]
+fn a_sort_or_a_filter_covers_every_page_and_goes_back_to_the_first() {
+    use egui_kittest::kittest::Queryable;
+    use replica_core::history::{HistoryQuery, SortBy};
+    let fixture = Fixture::with_data(|f| f.with_many_runs(260, 52));
+    let mut harness = shell_on(&fixture, Tab::History, 1200.0, 2400.0);
+    turn(&mut harness, "Next page");
+    turn(&mut harness, "Next page");
+    // Going up: test restores, which have no size, first.
+    harness.get_by_label("Sort by Size").click_accesskit();
+    let _ = harness.try_run();
+    assert_eq!(pager_says(&harness), "1–50 of 312");
+    let by_size = whole_history(
+        &fixture,
+        &HistoryQuery {
+            sort: Some((SortBy::Size, true)),
+            ..Default::default()
+        },
+    );
+    assert_eq!(history_shown(&harness), by_size[..50]);
+    turn(&mut harness, "Next page");
+    assert_eq!(history_shown(&harness), by_size[50..100]);
+
+    // A filter on page 2: page 1 of the failed ones (runs and test restores), all counted.
+    harness.state_mut().history.result = Some(Outcome::Failed);
+    let _ = harness.try_run();
+    let failed = whole_history(
+        &fixture,
+        &HistoryQuery {
+            outcome: Some(Outcome::Failed),
+            sort: Some((SortBy::Size, true)),
+            ..Default::default()
+        },
+    );
+    assert!(
+        failed.len() > 50 && failed.iter().any(|k| k.0),
+        "{}",
+        failed.len()
+    );
+    assert_eq!(pager_says(&harness), format!("1–50 of {}", failed.len()));
+    assert_eq!(history_shown(&harness), failed[..50]);
+}
+
+/// The chosen entry stays chosen as the list reads the history again, on the page it's on;
+/// Page Down and Page Up turn the page, choosing its first row, which is the new page's.
+#[test]
+fn the_chosen_entry_stays_chosen_and_page_keys_turn_the_page() {
+    use eframe::egui::Key;
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let fixture = Fixture::with_data(|f| f.with_many_runs(260, 52));
+    let mut harness = shell_on(&fixture, Tab::History, 1200.0, 2400.0);
+    let all = whole_history(&fixture, &Default::default());
+    let chosen = |h: &Harness<'_, Shell>| -> Vec<String> {
+        h.get_all_by_role(Role::ListBoxOption)
+            .filter(|n| n.accesskit_node().is_selected() == Some(true))
+            .filter_map(|n| n.accesskit_node().label())
+            .collect()
+    };
+    turn(&mut harness, "Next page");
+    let row = harness
+        .get_all_by_role(Role::ListBoxOption)
+        .nth(10)
+        .unwrap()
+        .accesskit_node()
+        .label()
+        .unwrap();
+    harness.get_by_label(&row).click_accesskit();
+    let _ = harness.try_run();
+    assert_eq!(chosen(&harness), std::slice::from_ref(&row));
+
+    // Read again (as every few seconds): still chosen, still page 2.
+    harness.state_mut().history.load();
+    let _ = harness.try_run();
+    assert_eq!(pager_says(&harness), "51–100 of 312");
+    assert_eq!(chosen(&harness), std::slice::from_ref(&row));
+
+    // Page Down: page 3, its first row chosen, drawn from the new page.
+    harness.key_press(Key::PageDown);
+    let _ = harness.try_run();
+    assert_eq!(pager_says(&harness), "101–150 of 312");
+    assert_eq!(history_shown(&harness), all[100..150]);
+    let first = harness
+        .get_all_by_role(Role::ListBoxOption)
+        .next()
+        .unwrap()
+        .accesskit_node()
+        .label()
+        .unwrap();
+    assert_eq!(chosen(&harness), [first]);
+    harness.key_press(Key::PageUp);
+    let _ = harness.try_run();
+    assert_eq!(pager_says(&harness), "51–100 of 312");
+    assert_eq!(history_shown(&harness), all[50..100]);
+}
+
+/// Restore's snapshots are paged too: 120 of them, 50 a page, no box of their own.
+#[test]
+fn restore_pages_its_snapshots() {
+    use egui_kittest::kittest::Queryable;
+    let fixture = Fixture::with_data(|f| f.with_many_snapshots(120));
+    let mut shell = fixture.shell(Tab::Restore);
+    shell.restore.job = Some("Documents".into());
+    let mut harness = Harness::builder()
+        .with_size([1200.0, 4000.0])
+        .with_max_steps(64)
+        .with_context_setup(|ctx| {
+            replica::ui::fonts::install(ctx).unwrap();
+            replica::ui::style(ctx);
+        })
+        .build_ui_state(|ui, shell: &mut Shell| shell.show(ui), shell);
+    restore_steps(&mut harness, 1);
+    assert_eq!(pager_says(&harness), "1–50 of 120");
+    turn(&mut harness, "Last page");
+    assert_eq!(pager_says(&harness), "101–120 of 120");
+    harness.get_by_label_contains(&format!("{:08x}", 0x5a00_0000 + 119));
+    assert!(harness.query_by_label_contains("4f2a91c0").is_none());
+}
+
+/// Every table has its pager, in reach at the window's least width (History's and the
+/// tasks' columns scroll sideways; their pagers don't), with one page, many, or none.
+#[test]
+fn every_table_has_its_pager_in_reach_at_the_least_width() {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let width = replica::ui::geometry::MIN_SIZE[0];
+    let docs = || task("Documents", "daily 02:30", true, Some(0));
+    let photos = || task("Photos", "every 6h", false, Some(2));
+    let cases: Vec<(Fixture, Tab, &str)> = vec![
+        (Fixture::new(), Tab::Jobs, "1–2 of 2"),
+        (
+            Fixture::with_data(|f| f.with_many_runs(260, 52)),
+            Tab::History,
+            "1–50 of 312",
+        ),
+        (Fixture::new(), Tab::History, "0 of 0"),
+        (
+            Fixture::with(ScheduleMode::TaskScheduler, vec![docs(), photos()]),
+            Tab::Schedules,
+            "1–2 of 2",
+        ),
+        (
+            Fixture::with(ScheduleMode::TaskScheduler, vec![]),
+            Tab::Schedules,
+            "0 of 0",
+        ),
+    ];
+    let in_reach = |harness: &Harness<'_, Shell>, what: &str| {
+        for button in ["First page", "Previous page", "Next page", "Last page"] {
+            let rect = harness.get_by_role_and_label(Role::Button, button).rect();
+            assert!(rect.right() <= width, "{what}'s {button}: {rect:?}");
+        }
+        let size = harness
+            .get_all_by_label("Rows per page")
+            .find(|n| n.accesskit_node().role() == Role::ComboBox)
+            .unwrap_or_else(|| panic!("{what}'s page size"));
+        assert!(
+            size.rect().right() <= width,
+            "{what}'s page size: {:?}",
+            size.rect()
+        );
+    };
+    for (fixture, tab, says) in &cases {
+        let harness = shell_on(fixture, *tab, width, 2400.0);
+        assert_eq!(pager_says(&harness), *says, "{tab:?}");
+        in_reach(&harness, &format!("{tab:?}"));
+    }
+
+    // A search that finds nothing: "0 of 0" under its empty state.
+    let fixture = Fixture::with_data(|f| f.with_many_runs(260, 52));
+    let mut harness = shell_on(&fixture, Tab::History, width, 2400.0);
+    harness.state_mut().history.search = "nothing has this".into();
+    let _ = harness.try_run();
+    harness.get_by_label("No runs match these filters");
+    assert_eq!(pager_says(&harness), "0 of 0");
+    in_reach(&harness, "History, searched");
+
+    // Restore's snapshots.
+    let fixture = Fixture::with_data(|f| f.with_many_snapshots(120));
+    let mut shell = fixture.shell(Tab::Restore);
+    shell.restore.job = Some("Documents".into());
+    let mut harness = Harness::builder()
+        .with_size([width, 2400.0])
+        .with_max_steps(64)
+        .with_context_setup(|ctx| {
+            replica::ui::fonts::install(ctx).unwrap();
+            replica::ui::style(ctx);
+        })
+        .build_ui_state(|ui, shell: &mut Shell| shell.show(ui), shell);
+    restore_steps(&mut harness, 1);
+    assert_eq!(pager_says(&harness), "1–50 of 120");
+    in_reach(&harness, "Restore");
+}
+
+/// Jobs keeps the chosen job chosen as runs reorder the list: chosen on page 2, it moves to
+/// page 1 when its last run changes, and no other job takes its place; the page stays where
+/// the user left it.
+#[test]
+fn a_chosen_job_stays_chosen_as_a_run_reorders_the_list() {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let now = chrono::Utc::now();
+    let names: Vec<String> = (0..60).map(|i| format!("job-{i:02}")).collect();
+    let jobs = names
+        .iter()
+        .map(|n| job(n, "daily 02:30", Mode::Versioned, r"C:\Work", "BACKUP"))
+        .collect();
+    let last = |hours: i64| LastRun {
+        at: now - chrono::TimeDelta::hours(hours),
+        outcome: Outcome::Ok,
+        reason: None,
+    };
+    let status = Status {
+        last: names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.clone(), last(i as i64 + 1)))
+            .collect(),
+        ..Status::default()
+    };
+    let fixture = Fixture::with_jobs(jobs, status);
+    let mut harness = shell_on(&fixture, Tab::Jobs, 1200.0, 4000.0);
+    let chosen = |h: &Harness<'_, Shell>| -> Vec<String> {
+        h.get_all_by_role(Role::ListBoxOption)
+            .filter(|n| n.accesskit_node().is_selected() == Some(true))
+            .filter_map(|n| n.accesskit_node().label())
+            .collect()
+    };
+    harness.get_by_label("Sort by Last run").click_accesskit();
+    let _ = harness.try_run();
+    turn(&mut harness, "Next page");
+    assert_eq!(pager_says(&harness), "51–60 of 60");
+    let job = harness
+        .get_all_by_role(Role::ListBoxOption)
+        .next()
+        .unwrap()
+        .accesskit_node()
+        .label()
+        .unwrap();
+    harness
+        .get_by_role_and_label(Role::ListBoxOption, &job)
+        .click_accesskit();
+    let _ = harness.try_run();
+    assert_eq!(chosen(&harness), std::slice::from_ref(&job));
+
+    // Its last run changes, so it moves to the other end of the list, on page 1: page 2 holds
+    // the ten at one end (the newest or the oldest, by the sort's direction), so it goes past
+    // the other end.
+    {
+        let mut status = fixture.backend.live.status.lock().unwrap();
+        let mut times: Vec<_> = status.last.values().map(|l| l.at).collect();
+        times.sort();
+        let (oldest, newest) = (times[0], times[times.len() - 1]);
+        let among_newest = status.last[&job].at >= times[times.len() / 2];
+        let at = if among_newest {
+            oldest - chrono::TimeDelta::hours(1)
+        } else {
+            newest + chrono::TimeDelta::hours(1)
+        };
+        status.last.insert(job.clone(), LastRun { at, ..last(0) });
+    }
+    let _ = harness.try_run();
+    // Still page 2, and no other job is chosen in its place.
+    assert_eq!(pager_says(&harness), "51–60 of 60");
+    assert!(
+        harness
+            .query_by_role_and_label(Role::ListBoxOption, &job)
+            .is_none(),
+        "{job} moved off page 2"
+    );
+    assert_eq!(chosen(&harness), Vec::<String>::new());
+    turn(&mut harness, "First page");
+    assert_eq!(chosen(&harness), std::slice::from_ref(&job));
 }

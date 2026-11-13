@@ -256,6 +256,15 @@ done or skipped, or are overdue (click it to see them in History); what runs the
 available**, when the update check has found a newer Replica (click it to open that release's
 page).
 
+**Tables** (Jobs, History, Restore's snapshots, Schedules' tasks) show a page of rows at a time,
+with a pager under each: which rows show ("51–100 of 312"), buttons for the first, previous,
+next and last page, and **Rows per page**: 25, 50 (the default) or 100, one choice for every
+table, remembered (as `table_page_size` in the settings file). A click on a column's title
+sorts the whole list, not just the page, and goes back to the first page; so does a filter or
+a search. With a table chosen, the arrow keys, Home and End move within the page, and Page Up
+and Page Down turn it. History counts and searches every run and test restore it has, however
+old, and reads only the page you're on.
+
 ## Updates
 
 Replica can tell you when a new version is out. **It never downloads or installs anything**: it
