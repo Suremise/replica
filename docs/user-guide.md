@@ -10,6 +10,7 @@ getting files back, and what to do when something goes wrong.
 - [The repository password](#the-repository-password)
 - [Before and after steps](#before-and-after-steps)
 - [Schedules](#schedules)
+- [The window](#the-window): its menus, status bar and tables
 - [Updates](#updates)
 - [The tray icon](#the-tray-icon)
 - [Restoring](#restoring)
@@ -17,6 +18,7 @@ getting files back, and what to do when something goes wrong.
 - [Retention and verify](#retention-and-verify)
 - [Keeping something forever](#keeping-something-forever)
 - [Recover without Replica](#recover-without-replica)
+- [Moving jobs to another PC](#moving-jobs-to-another-pc)
 - [Running Replica from other apps](#running-replica-from-other-apps)
 - [Installed or portable](#installed-or-portable)
 - [Troubleshooting](#troubleshooting)
@@ -318,7 +320,8 @@ notification area only, so logging on doesn't open the window.
 Closing or minimising the window keeps Replica running in the notification area (the first time,
 it says so). **Quit** in the tray menu stops the tray app and its built-in timer. **Task
 Scheduler's tasks keep running without it**, by design: to stop scheduled backups whatever runs
-them, use **Pause schedules**, or turn Task Scheduler off (or turn its tasks off) in **Settings**.
+them, use **Pause schedules**, turn the Task Scheduler option off in **Settings > Scheduling**,
+or turn its tasks off one by one on the **Schedules** page, under **Task Scheduler tasks**.
 
 ## Restoring
 

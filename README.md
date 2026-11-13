@@ -10,7 +10,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/jobs-dark.png">
-  <img src="docs/screenshots/jobs-light.png" alt="Replica's window on its Jobs page: a menu bar (File, Jobs, View, Tools, Help), a sidebar of Jobs, History, Restore, Schedules and Settings, and a table of six backup jobs with their status (OK, running at 42%, failed, skipped, never run and waiting its turn), last and next run, schedule, targets and actions; along the bottom, a status bar with the running job's progress, the next run, 1 failed and 1 skipped, and the built-in timer">
+  <img src="docs/screenshots/jobs-light.png" alt="Replica's window on its Jobs page: a menu bar (File, Jobs, View, Tools, Help), a sidebar of Jobs, History, Restore and Schedules with Settings at its foot, and a table of six backup jobs with their status (OK, running at 42%, failed, skipped, never run and waiting its turn), last and next run, schedule, targets and actions, with a pager under it (1–6 of 6, 50 rows per page); along the bottom, a status bar with the running job's progress, the next run, 1 failed and 1 skipped, and the built-in timer">
 </picture>
 
 Replica backs up your folders to an external drive or a NAS share on a schedule. Each backup is a
@@ -141,15 +141,20 @@ catches up.
 ## Schedules
 
 A job's `schedule` is `daily 02:30`, `weekly mon,thu 21:00`, `every 6h` or `every 90m`; without
-one, it runs only when you ask.
+one, it runs only when you ask. In the window, the **Schedules** page sets each job's schedule,
+with the same choices as the job editor, says when it next runs, and lists Replica's tasks in
+Task Scheduler; **Settings > Scheduling** chooses what runs the schedules.
 
 - **The built-in timer (the default):** the tray app runs schedules while it's running. Turn on
   **Start with Windows** in its menu, and it always is.
-- **Windows Task Scheduler (optional, off by default):** set `schedule_mode = "task-scheduler"`,
-  and Replica makes a per-user task for each scheduled job (no admin rights), so backups run even
-  when the tray app isn't running, while you're logged on. `replica tasks list` shows them all,
-  and `replica tasks enable|disable|remove` manages them. Turning the option off removes the tasks
-  that are on; `replica tasks remove --all` removes any you'd turned off too.
+- **Windows Task Scheduler (optional, off by default):** choose it in **Settings > Scheduling**
+  (or set `schedule_mode = "task-scheduler"`), and Replica makes a per-user task for each
+  scheduled job (no admin rights), so backups run even when the tray app isn't running, while
+  you're logged on. The **Schedules** page lists them, with each one's switch and Delete, as
+  `replica tasks list` and `replica tasks enable|disable|remove` do. Turning the option off in
+  the window asks whether to delete the tasks or keep them turned off; turned off in the file,
+  the tasks that are on are removed. `replica tasks remove --all` removes any you'd turned off
+  too.
 
 The two never both run a job, and a job never runs twice at once.
 
@@ -238,9 +243,9 @@ and if they match, choose **More info**, then **Run anyway**.
 
 **No telemetry, ever.** Replica sends nothing anywhere and has no account. It connects to
 nothing but the targets you set up (your drives and your NAS shares), and to GitHub only if you
-ask: **"Check for updates" is off by default**. When you turn it on, or press Check now in
-About, Replica only reads which release is the latest on GitHub; it never downloads or installs
-anything by itself.
+ask: **"Check for updates" is off by default**. When you turn it on, or press **Check now** in
+About (or **Help > Check for updates…**), Replica only reads which release is the latest on
+GitHub; it never downloads or installs anything by itself.
 
 ## Licence
 
