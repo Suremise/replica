@@ -1919,7 +1919,6 @@ fn every_table_fills_its_width_as_the_window_grows_and_shrinks() {
 /// fills its frame: Tags, which takes what's left, gives up the room.
 #[test]
 fn a_column_resized_by_hand_keeps_its_width_and_the_table_still_fills() {
-    use eframe::egui::{Event, PointerButton, pos2};
     use egui_kittest::kittest::Queryable;
     let fixture = Fixture::with_data(Faked::with_snapshots);
     let mut shell = fixture.shell(Tab::Restore);
@@ -1944,26 +1943,7 @@ fn a_column_resized_by_hand_keeps_its_width_and_the_table_still_fills() {
     let y = harness.get_by_label("Pinned").rect().center().y;
 
     // Date's right edge dragged 60 points right, with the harness's own pointer.
-    harness.event(Event::PointerMoved(pos2(line, y)));
-    harness.step();
-    harness.event(Event::PointerButton {
-        pos: pos2(line, y),
-        button: PointerButton::Primary,
-        pressed: true,
-        modifiers: Default::default(),
-    });
-    harness.step();
-    for dx in [10.0, 30.0, 60.0] {
-        harness.event(Event::PointerMoved(pos2(line + dx, y)));
-        harness.step();
-    }
-    harness.event(Event::PointerButton {
-        pos: pos2(line + 60.0, y),
-        button: PointerButton::Primary,
-        pressed: false,
-        modifiers: Default::default(),
-    });
-    let _ = harness.try_run();
+    drag_line(&mut harness, line, 60.0, y);
     let dragged = pinned(&harness);
     assert!(
         (dragged - before - 60.0).abs() < 2.0,
@@ -1982,6 +1962,128 @@ fn a_column_resized_by_hand_keeps_its_width_and_the_table_still_fills() {
         "Date kept its width: Pinned {offset} from Date's title, then {wide}"
     );
     table(&harness);
+}
+
+/// Drags the column line at `x` (at height `y`) by `dx` points, with the harness's own pointer
+/// (no global input), and lets the table settle.
+fn drag_line(harness: &mut Harness<'_, Shell>, x: f32, dx: f32, y: f32) {
+    use eframe::egui::{Event, PointerButton, pos2};
+    harness.event(Event::PointerMoved(pos2(x, y)));
+    harness.step();
+    harness.event(Event::PointerButton {
+        pos: pos2(x, y),
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    });
+    harness.step();
+    for part in [1.0 / 6.0, 0.5, 1.0] {
+        harness.event(Event::PointerMoved(pos2(x + dx * part, y)));
+        harness.step();
+    }
+    harness.event(Event::PointerButton {
+        pos: pos2(x + dx, y),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
+    let _ = harness.try_run();
+}
+
+/// Whether a column line is at `x` (at height `y`): the pointer there shows the resize cursor,
+/// read once the window has seen the pointer there and its frames have settled.
+fn a_line_at(harness: &mut Harness<'_, Shell>, x: f32, y: f32) -> bool {
+    let at = eframe::egui::pos2(x, y);
+    harness.event(eframe::egui::Event::PointerMoved(at));
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        harness.step();
+        if harness.ctx.pointer_hover_pos() == Some(at) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "the pointer reached {at:?}"
+        );
+    }
+    harness
+        .try_run()
+        .expect("the window settles with the pointer still");
+    harness.output().platform_output.cursor_icon == eframe::egui::CursorIcon::ResizeColumn
+}
+
+/// A line right of the flexible column moves the left edge of the column after it, which keeps
+/// its right edge: dragging Restore's Tags|Size line 40 points left makes Size 40 wider, Tags
+/// gives up the room, and Size keeps that width as the window grows, Tags taking the rest.
+#[test]
+fn a_line_right_of_the_flexible_column_widens_the_column_after_it() {
+    use egui_kittest::kittest::Queryable;
+    const SIZE: f32 = 84.0;
+    let fixture = Fixture::with_data(Faked::with_snapshots);
+    let mut shell = fixture.shell(Tab::Restore);
+    shell.restore.job = Some("Documents".into());
+    let mut harness = Harness::builder()
+        .with_size([1200.0, 1500.0])
+        .with_max_steps(64)
+        .with_context_setup(|ctx| {
+            replica::ui::fonts::install(ctx).unwrap();
+            replica::ui::style(ctx);
+        })
+        .build_ui_state(|ui, shell: &mut Shell| shell.show(ui), shell);
+    restore_steps(&mut harness, 1);
+    let _ = harness.try_run();
+    let pad = replica::ui::theme::space::S;
+    let title = |h: &Harness<'_, Shell>, label: &str| h.get_by_label(label).rect();
+    // ID's title is padded from its cell's left edge, Size's right edge; Size is 84 wide.
+    let id = title(&harness, "ID").left();
+    let size_right = title(&harness, "Size").right();
+    let line = id - pad - SIZE;
+    let y = title(&harness, "Size").center().y;
+    assert!(
+        a_line_at(&mut harness, line, y),
+        "the Tags|Size line at {line}"
+    );
+    let tags = title(&harness, "Tags").left();
+
+    drag_line(&mut harness, line, -40.0, y);
+    // The line moved with the pointer, and nothing right of it did: Size is 40 wider.
+    assert!(
+        a_line_at(&mut harness, line - 40.0, y),
+        "the line is where it was dragged to, {}",
+        line - 40.0
+    );
+    assert!(
+        !a_line_at(&mut harness, line, y),
+        "no line where it was, {line}"
+    );
+    assert!(
+        (title(&harness, "Size").right() - size_right).abs() < 1.0,
+        "Size's right edge stays put"
+    );
+    assert!(
+        (title(&harness, "ID").left() - id).abs() < 1.0,
+        "ID stays put"
+    );
+    assert!(
+        (title(&harness, "Tags").left() - tags).abs() < 1.0,
+        "Tags starts where it did"
+    );
+    assert_fills(&harness, "Snapshot", "ID", SIZE, "after the drag");
+
+    // Wider, Size keeps its 124 points, and Tags takes the rest.
+    harness.set_size(eframe::egui::vec2(WIDE, 1500.0));
+    let _ = harness.try_run();
+    let table = assert_fills(&harness, "Snapshot", "ID", SIZE, "grown wide");
+    assert!(table.right() > WIDE - 60.0, "the table grew: {table:?}");
+    let line = title(&harness, "ID").left() - pad - (SIZE + 40.0);
+    assert!(
+        a_line_at(&mut harness, line, y),
+        "Size is still 124 wide, its line at {line}"
+    );
+    assert!(
+        !a_line_at(&mut harness, line + 40.0, y),
+        "and not back at 84"
+    );
 }
 
 // --- Restore's choices, as they change -----------------------------------------------------
